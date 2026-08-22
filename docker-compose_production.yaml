@@ -1,0 +1,61 @@
+﻿services:
+  Vela-backend:
+    build: .
+    container_name: Vela-backend
+    # No bind mount here (unlike docker-compose_local.yaml): production must
+    # run exactly what was built into the image, not whatever happens to be
+    # on the host filesystem at deploy time - a bind mount here would have
+    # silently defeated the reproducibility a container image is supposed to
+    # guarantee, and would additionally have exposed the host's .env file
+    # inside the container's filesystem.
+    environment:
+      # All values below are supplied by a docker-compose ".env" file or the
+      # host/CI secret store at deploy time - never hardcode credentials here.
+      # Variable names must match core/config.py's Settings fields exactly.
+      - MONGODB_URI=${MONGODB_URI:?MONGODB_URI must be set}
+      - MONGODB_DB_NAME=${MONGODB_DB_NAME:-Vela}
+      - MILVUS_URI=${MILVUS_URI:?MILVUS_URI must be set}
+      - OLLAMA_URI=${OLLAMA_URI:-}
+      - OLLAMA_HOSTS=${OLLAMA_HOSTS:-}
+      - EMBED_MODEL=${EMBED_MODEL:?EMBED_MODEL must be set}
+      - LLM_MODEL=${LLM_MODEL:?LLM_MODEL must be set}
+      - Vela_API_KEY=${Vela_API_KEY:?Vela_API_KEY must be set}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-15}
+      - JWT_REFRESH_TOKEN_EXPIRE_DAYS=${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-30}
+    ports:
+      - "9850:8000"
+    restart: always
+    networks:
+      - coolify
+    # Defense in depth for a process that's already running as a non-root
+    # user (see Dockerfile): even if the app or a dependency were compromised,
+    # it can't escalate privileges or exercise Linux capabilities it has no
+    # legitimate use for.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Bounds how much of the host's resources a single runaway request (e.g.
+    # someone hammering POST /v1/pipelines/clustering/run) can consume.
+    # Tune these against real measured usage before relying on them in a high
+    # -traffic deployment - they're deliberately generous starting defaults,
+    # not a tuned production ceiling. Note: `deploy.resources` is honored by
+    # Docker Compose V2 (the `docker compose` CLI) for plain `up`, but is
+    # Swarm-only under the legacy standalone `docker-compose` v1 binary - if
+    # you're still on v1, pass --memory/--cpus to `docker run` instead, or
+    # upgrade to Compose V2.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2g
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+
+networks:
+  coolify:
+    external: true
+

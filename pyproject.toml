@@ -1,0 +1,47 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+exclude = [".venv", ".venv-linux", "__pycache__"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes (unused imports/vars, undefined names)
+    "W",    # pycodestyle warnings
+    "I",    # isort (import ordering)
+    "B",    # flake8-bugbear (likely bugs / footguns)
+    "S",    # flake8-bandit (security lint: hardcoded secrets, insecure calls)
+    "UP",   # pyupgrade (modern Python idioms)
+]
+ignore = [
+    "E501",   # line length is a formatter's job, not a hard lint failure
+    "S101",   # assert is fine in test_api.py; don't blanket-ban it
+    "UP042",  # (str, Enum) -> StrEnum: not purely cosmetic - StrEnum's __str__/__format__
+              # behavior differs subtly and these enums flow through Pydantic
+              # serialization and Mongo documents everywhere. Not worth the
+              # regression risk for a style preference; revisit deliberately,
+              # with full test coverage, if ever desired.
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# ruff's own B008 defaults only recognize fastapi.Query/File/Form as safe
+# when the annotated parameter type is a plain builtin (str, int, etc.) -
+# confirmed empirically: `x: str | None = Query(None)` passes by default,
+# but `x: SomeEnum | None = Query(None)` does not, even though FastAPI
+# evaluates both identically once per request via its DI system. This
+# codebase has real, recurring typed query params over its own enums
+# (StatementStatus, TransactionType - routers/statements.py) and file
+# uploads (UploadFile - routers/statements.py), so all of these plus
+# Depends/Security (which get no default exemption at all) are listed
+# explicitly rather than working around it per call site.
+extend-immutable-calls = [
+    "fastapi.Depends", "fastapi.Security", "fastapi.Query", "fastapi.File", "fastapi.Form",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"test_api.py" = ["S101", "S105", "S106", "S107", "S311"]  # asserts, test fixture "keys", and non-crypto random test data
+"scripts/*.py" = ["S105", "S106", "S108", "S311"]  # dev/local-only scripts with known local defaults and non-crypto mock data generation
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+python_files = ["test_*.py"]

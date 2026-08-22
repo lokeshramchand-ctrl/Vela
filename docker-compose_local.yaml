@@ -1,0 +1,119 @@
+﻿services:
+  mongodb:
+    image: mongo:6.0
+    container_name: mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---- Milvus standalone stack (etcd + minio + milvus) ----
+  # Self-contained so `docker compose up` is enough for local dev - no
+  # separately-managed Milvus deployment required. docker-compose_production.yaml
+  # deliberately skips this and points MILVUS_URI at an externally managed
+  # instance instead.
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    container_name: milvus-etcd
+    restart: always
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls=http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: milvus-minio
+    restart: always
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    command: minio server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  milvus:
+    image: milvusdb/milvus:v2.5.3
+    container_name: milvus
+    restart: always
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      - milvus_data:/var/lib/milvus
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  Vela-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: Vela-backend
+    working_dir: /app
+    # Bind-mounting the repo here is intentional and dev-only: it lets you
+    # edit code on the host and see it reflected without rebuilding the
+    # image. docker-compose_production.yaml deliberately does NOT do this -
+    # production must run exactly what was built into the image.
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    ports:
+      - "9850:8000"
+    # Ollama runs natively on the host (systemd service), not in this
+    # compose stack - GPU/driver passthrough into a container isn't worth
+    # it for a service that already works on the host. host-gateway lets
+    # the container reach it via OLLAMA_URI=http://host.docker.internal:11434
+    # (see .env) on Linux, macOS, and Windows alike.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  mongo_data:
+  etcd_data:
+  minio_data:
+  milvus_data:
+
