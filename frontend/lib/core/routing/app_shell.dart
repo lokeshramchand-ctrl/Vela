@@ -25,6 +25,7 @@ class _AppShellState extends ConsumerState<AppShell> {
     NavTabSpec(label: 'Overview', icon: Icons.dashboard_outlined),
     NavTabSpec(label: 'Signals', icon: Icons.bolt_outlined),
     NavTabSpec(label: 'Activity', icon: Icons.receipt_long_outlined),
+    NavTabSpec(label: 'Controller', icon: Icons.assessment_outlined),
   ];
 
   @override
