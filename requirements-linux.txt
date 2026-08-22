@@ -1,0 +1,37 @@
+# Historically a separate "full Linux system" superset of requirements.txt;
+# nothing in this repo (Dockerfile, CI, docs) actually installs from this
+# file specifically, so it's kept identical to requirements.txt to avoid the
+# two files silently drifting apart again. If you need a genuinely different
+# dependency set for a specific Linux target, prefer adding a clearly-named
+# extra requirements file instead of reintroducing drift here.
+
+# Core runtime dependencies for the live API (app.py's import graph).
+setuptools==83.0.0  # patched per pip-audit; pymilvus>=2.6 no longer needs pkg_resources from it
+fastapi==0.140.13  # pulls in a starlette version with no known CVEs, see requirements.txt
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+slowapi==0.1.9
+prometheus-fastapi-instrumentator==8.1.0  # 7.0.0 breaks under the newer starlette pulled in by fastapi above
+
+httpx==0.28.1
+
+pypdf==6.14.2
+pdfplumber==0.11.10
+python-multipart==0.0.32
+
+PyJWT==2.13.0
+argon2-cffi==25.1.0
+email-validator==2.3.0
+
+motor==3.6.0
+pymongo==4.9.2
+pymilvus==2.6.17
+
+numpy==1.26.4
+scikit-learn==1.5.2
+umap-learn==0.5.7
+networkx==3.4.2
+
+pytest==9.1.1  # patched per pip-audit (PYSEC-2026-1845 affects <9.0.3)

@@ -1,0 +1,75 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required in every build variant (not just debug) - the app is
+         entirely backend-dependent (auth, statements, jobs, feedback all go
+         over HTTPS via Dio). Flutter's debug-only manifest declares this too,
+         but only for the dev tooling's own VM service connection - that
+         doesn't cover release/profile builds. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Android 13+ requires this at runtime too (requested via
+         LocalNotificationsService.requestPermission) before any notification
+         posted with flutter_local_notifications will actually show. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Self-hosted app updater (features/app_update) - required to launch
+         the system "install unknown app" flow for a downloaded release APK
+         via open_filex. Android 8+ still prompts the user for a one-time,
+         per-app "allow installs from this source" toggle the first time this
+         fires - this permission is what makes that prompt reachable at all,
+         not a bypass of it. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <application
+        android:label="Vela"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher"
+        android:networkSecurityConfig="@xml/network_security_config">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <!-- Specifies an Android theme to apply to this Activity as soon as
+                 the Android process has started. This theme is visible to the user
+                 while the Flutter UI initializes. After that, this theme continues
+                 to determine the Window background behind the Flutter UI. -->
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <!-- Don't delete the meta-data below.
+             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+    <!-- Required to query activities that can process text, see:
+         https://developer.android.com/training/package-visibility and
+         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+
+         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- Required for file_picker's ACTION_OPEN_DOCUMENT call (statement
+             upload, FileType.custom / allowedExtensions: ['pdf']) to resolve
+             the system document picker under Android 11+ package-visibility
+             rules. Without this, FileUtils.kt's resolveActivity() check
+             silently returns null and the picker never launches - no
+             exception, no activity switch, tap just does nothing. Confirmed
+             by testing a release build against a real device. -->
+        <intent>
+            <action android:name="android.intent.action.OPEN_DOCUMENT"/>
+            <category android:name="android.intent.category.OPENABLE"/>
+            <data android:mimeType="*/*"/>
+        </intent>
+    </queries>
+</manifest>

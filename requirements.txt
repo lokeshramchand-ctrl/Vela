@@ -1,0 +1,89 @@
+# Core runtime dependencies for the live API (app.py's import graph).
+# This is what the production Docker image installs - see Dockerfile.
+# For the offline training/fine-tuning scripts (training/*.py,
+# evaluation/metrics.py - never imported by the live app), see
+# requirements-training.txt instead.
+
+# setuptools isn't imported directly by this app, but pymilvus<2.6 needed
+# pkg_resources at import time and didn't reliably pull setuptools in as an
+# installed dependency in an isolated/minimal install (as used by this repo's
+# multi-stage Dockerfile). Rather than pin an old, still-partially-vulnerable
+# setuptools to keep pkg_resources around (setuptools>=83 removes it
+# entirely - discovered by actually testing this combination end-to-end, not
+# assumed), the pymilvus upgrade below removes the pkg_resources dependency
+# at its source, so setuptools can just be left fully patched.
+setuptools==83.0.0
+
+# Web framework & server
+# fastapi's minimum starlette bound is what actually carries the fix for
+# several starlette CVEs (PYSEC-2026-161/248/249/1941/1942/2280/2281) that
+# `pip-audit` flags against the previously pinned fastapi==0.115.6 - bumping
+# fastapi (which pulls in a patched starlette transitively) is the correct
+# fix, not pinning starlette directly against a fastapi version that never
+# tested against it.
+fastapi==0.140.13
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# Rate limiting & observability
+slowapi==0.1.9
+# 7.0.0's internal Starlette route-name lookup breaks under the newer
+# Starlette pulled in by fastapi==0.140.13 above (AttributeError:
+# '_IncludedRouter' object has no attribute 'path' - discovered by actually
+# running the test suite against the upgraded fastapi/starlette, not assumed
+# compatible). 8.1.0 is the fix.
+prometheus-fastapi-instrumentator==8.1.0
+
+# HTTP client (Ollama, health checks)
+httpx==0.28.1
+
+# Statement ingestion (statements/pdf_parser.py)
+# pypdf: PDF structural validation, decryption (password-protected statements),
+# and best-effort document metadata - pure Python, no native extension beyond
+# what cryptography already pulls in for decryption support.
+pypdf==6.14.2
+# pdfplumber: text extraction. Its default word x_tolerance (3) collapses
+# inter-word spacing on this statement format entirely (confirmed against a
+# real Google Pay statement - "Paid to Toni and Guy" extracts as
+# "PaidtoToniandGuy" at the default tolerance); statements/pdf_parser.py calls
+# extract_text(x_tolerance=1) specifically to avoid that.
+pdfplumber==0.11.10
+# python-multipart: required by FastAPI/Starlette for any Form()/UploadFile()
+# parameter (POST /statements/upload) - importing it is a hard runtime
+# requirement, not optional, the moment any route declares one.
+python-multipart==0.0.32
+
+# Authentication (core/jwt_auth.py, core/security.py, routers/auth.py)
+# PyJWT: access-token signing/verification (HS256). Refresh tokens are
+# deliberately NOT JWTs - see core/jwt_auth.py::generate_refresh_token - so
+# no asymmetric-key/JWKS machinery is needed here.
+PyJWT==2.13.0
+# argon2-cffi: OWASP's current #1 recommended password hashing algorithm
+# (Argon2id), actively maintained. Preferred over passlib's bcrypt wrapper,
+# which has had repeated compatibility breaks against newer bcrypt releases.
+argon2-cffi==25.1.0
+# email-validator: required at import time by pydantic's EmailStr, used on
+# RegisterRequest/LoginRequest to reject malformed addresses before they
+# ever reach the database.
+email-validator==2.3.0
+
+# Databases
+motor==3.6.0
+pymongo==4.9.2
+# 2.5.3 imports pkg_resources at module load time, which setuptools>=83 no
+# longer provides (see the setuptools comment above) - 2.6.17 dropped that
+# dependency. Verified: `from pymilvus import MilvusClient, MilvusException`
+# imports cleanly with setuptools==83.0.0 installed alongside this version.
+pymilvus==2.6.17
+
+# Clustering (Phase 8 - POST /v1/pipelines/clustering/run, lazily imported
+# but a real, mounted, live endpoint - not an offline/training-only path)
+numpy==1.26.4
+scikit-learn==1.5.2
+umap-learn==0.5.7
+networkx==3.4.2
+
+# Testing
+# 8.3.4 has a known advisory (PYSEC-2026-1845) fixed starting in 9.0.3.
+pytest==9.1.1

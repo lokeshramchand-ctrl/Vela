@@ -1,0 +1,25 @@
+node_modules
+package-lock.json
+.env
+# Ignore version control
+.git
+
+# Ignore virtual environments
+.venv
+env/
+venv/
+
+# Ignore caches and build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.sqlite3
+
+# Ignore node modules if present
+node_modules/
+
+# Ignore IDE configs
+.vscode/
+.idea/

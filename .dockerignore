@@ -1,0 +1,33 @@
+# Secrets - never let these end up baked into an image layer via `COPY . .`
+.env
+.env.*
+*.pem
+*.key
+
+# Virtual environments (never needed in the image - deps are pip-installed
+# fresh in the builder stage)
+.venv
+.venv-linux
+venv/
+env/
+
+__pycache__/
+*.pyc
+*.log
+.coverage
+.pytest_cache/
+
+.git
+.gitignore
+.github/
+
+# Docs and dev-only material - not needed at runtime, just bloats the build
+# context and the final image
+docs/
+*.md
+assets/
+.claude/
+
+# Local-only compose/dev files - the image doesn't need to see these
+docker-compose_local.yaml
+docker-compose_production.yaml
