@@ -57,7 +57,7 @@ Most transaction-categorization systems either rely on brittle string matching o
 
 - **Deterministic rules** handle the obvious cases fast and cheaply.
 - **A trust/memory state machine** means a merchant isn't treated as reliable the first time it's seen â€” trust is earned over repeated encounters.
-- **A confidence wall** actively rejects low-confidence or out-of-vocabulary predictions rather than letting a bad guess pollute analytics â€” *"Unknown" is treated as a valid, honest answer.*
+- **A confidence wall** actively rejects low-confidence or out-of-vocabulary predictions rather than letting a bad guess pollute analytics â€” _"Unknown" is treated as a valid, honest answer._
 - **A grounded RAG layer** explains categorizations in natural language, but is architecturally forbidden from answering unless it has real retrieved data to point to.
 
 Vela is built as a single async FastAPI service backed by MongoDB (system of record) and Milvus (semantic vector search), with Ollama providing local/self-hosted embeddings and generation.
@@ -82,60 +82,60 @@ flowchart LR
 
 Vela's own code comments describe the system as a sequence of numbered **phases** â€” this isn't a documentation invention, it's how the codebase actually labels itself:
 
-| Phase | Capability | Status |
-|---|---|---|
-| 1â€“3 | Rule-based categorization + noisy-text merchant resolution | Working |
-| 4 | Memory / trust state machine (`EPHEMERAL â†’ TEMPORARY â†’ PERMANENT`) | Working |
-| 5 | Confidence wall (reject low-confidence predictions) | Working |
-| 6 | Behavioral feature extraction (amount, timing, frequency, periodicity) | Working; trigger via `POST /v1/pipelines/behavior/run-all` |
-| 7 | Embeddings + Milvus vector search | Working; trigger via `POST /v1/pipelines/embeddings/sync` |
-| 8 | UMAP + HDBSCAN clustering | Fixed; trigger via `POST /v1/pipelines/clustering/run` |
-| 9 | Baseline ML model benchmarking | Script-only, synthetic data (real-data training is scoped future work) |
-| 10 | Human feedback + active learning queue | Mounted at `POST /v1/feedback/`; retraining executor still pending (needs a task queue) |
-| 11 | LoRA fine-tuning (FinBERT) | Script-only, synthetic data (real-data training is scoped future work) |
-| 12 | Grounded RAG explainability | Working end-to-end |
-| 13 | Spend analytics (patterns, subscriptions, trends, anomalies) | Working |
-| 14 | Observability / drift monitoring | Stubbed â€” needs Evidently/MLflow integration (infra decision, not a bug) |
-| 15 | API key authentication + rate limiting | Working â€” key is enforced, rate limit is live on `/v1/categorize` |
+| Phase | Capability                                                             | Status                                                                                  |
+| ----- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 1â€“3 | Rule-based categorization + noisy-text merchant resolution             | Working                                                                                 |
+| 4     | Memory / trust state machine (`EPHEMERAL â†’ TEMPORARY â†’ PERMANENT`) | Working                                                                                 |
+| 5     | Confidence wall (reject low-confidence predictions)                    | Working                                                                                 |
+| 6     | Behavioral feature extraction (amount, timing, frequency, periodicity) | Working; trigger via `POST /v1/pipelines/behavior/run-all`                              |
+| 7     | Embeddings + Milvus vector search                                      | Working; trigger via `POST /v1/pipelines/embeddings/sync`                               |
+| 8     | UMAP + HDBSCAN clustering                                              | Fixed; trigger via `POST /v1/pipelines/clustering/run`                                  |
+| 9     | Baseline ML model benchmarking                                         | Script-only, synthetic data (real-data training is scoped future work)                  |
+| 10    | Human feedback + active learning queue                                 | Mounted at `POST /v1/feedback/`; retraining executor still pending (needs a task queue) |
+| 11    | LoRA fine-tuning (FinBERT)                                             | Script-only, synthetic data (real-data training is scoped future work)                  |
+| 12    | Grounded RAG explainability                                            | Working end-to-end                                                                      |
+| 13    | Spend analytics (patterns, subscriptions, trends, anomalies)           | Working                                                                                 |
+| 14    | Observability / drift monitoring                                       | Stubbed â€” needs Evidently/MLflow integration (infra decision, not a bug)              |
+| 15    | API key authentication + rate limiting                                 | Working â€” key is enforced, rate limit is live on `/v1/categorize`                     |
 
 **Full architecture deep-dive, sequence diagrams, and per-folder/per-file references live in [`/docs`](./docs/README.md).**
 
 ## Features
 
-| Feature | Endpoint(s) | Status |
-|---|---|---|
-| Deterministic merchant/category rule matching | `POST /v1/categorize` | Stable |
-| Noisy UPI/bank text â†’ canonical merchant resolution | `POST /v1/resolve` | Stable |
-| Confidence-wall prediction gating | `POST /v1/confidence/evaluate` | Stable |
-| Merchant trust/memory state tracking | `POST /memory/update`, `GET /memory/profile/{name}`, `GET /memory/state/{name}` | Stable |
-| Spend breakdown by category & top merchants | `GET /v1/analytics/patterns/*` | Stable |
-| Subscription detection | `GET /v1/analytics/subscriptions` | Needs backfill â€” run `POST /v1/pipelines/behavior/run-all` first |
-| Real-time anomaly detection (z-score) | `POST /v1/analytics/anomaly/check` | Needs backfill â€” run `POST /v1/pipelines/behavior/run-all` first |
-| Month-over-month trend | `GET /v1/analytics/trends/mom` | Stable |
-| Human feedback + active learning queue | `POST /v1/feedback/` | Stable (retraining executor still pending â€” see Known Limitations) |
-| Batch pipelines (behavior, embeddings, decay, graph, clustering) | `POST /v1/pipelines/*` | Stable; manually triggered (no scheduler yet) |
-| Grounded, hallucination-resistant explanations | `POST /v1/explain` | Stable |
-| Health check & Prometheus metrics | `GET /health`, `GET /metrics` | Stable |
+| Feature                                                          | Endpoint(s)                                                                     | Status                                                               |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Deterministic merchant/category rule matching                    | `POST /v1/categorize`                                                           | Stable                                                               |
+| Noisy UPI/bank text â†’ canonical merchant resolution            | `POST /v1/resolve`                                                              | Stable                                                               |
+| Confidence-wall prediction gating                                | `POST /v1/confidence/evaluate`                                                  | Stable                                                               |
+| Merchant trust/memory state tracking                             | `POST /memory/update`, `GET /memory/profile/{name}`, `GET /memory/state/{name}` | Stable                                                               |
+| Spend breakdown by category & top merchants                      | `GET /v1/analytics/patterns/*`                                                  | Stable                                                               |
+| Subscription detection                                           | `GET /v1/analytics/subscriptions`                                               | Needs backfill â€” run `POST /v1/pipelines/behavior/run-all` first   |
+| Real-time anomaly detection (z-score)                            | `POST /v1/analytics/anomaly/check`                                              | Needs backfill â€” run `POST /v1/pipelines/behavior/run-all` first   |
+| Month-over-month trend                                           | `GET /v1/analytics/trends/mom`                                                  | Stable                                                               |
+| Human feedback + active learning queue                           | `POST /v1/feedback/`                                                            | Stable (retraining executor still pending â€” see Known Limitations) |
+| Batch pipelines (behavior, embeddings, decay, graph, clustering) | `POST /v1/pipelines/*`                                                          | Stable; manually triggered (no scheduler yet)                        |
+| Grounded, hallucination-resistant explanations                   | `POST /v1/explain`                                                              | Stable                                                               |
+| Health check & Prometheus metrics                                | `GET /health`, `GET /metrics`                                                   | Stable                                                               |
 
 Legend: **Stable** â€” working correctly and verified Â· **Needs backfill** â€” works, but depends on a manual step
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| API Framework | [FastAPI](https://fastapi.tiangolo.com/) + [Uvicorn](https://www.uvicorn.org/) |
-| Primary Database | [MongoDB](https://www.mongodb.com/) via [Motor](https://motor.readthedocs.io/) (async) |
-| Vector Database | [Milvus](https://milvus.io/) via `pymilvus` |
-| LLM / Embeddings | [Ollama](https://ollama.com/) (self-hosted inference) |
-| Rate Limiting | [SlowAPI](https://github.com/laurentS/slowapi) |
-| Metrics | [prometheus-fastapi-instrumentator](https://github.com/trallnag/prometheus-fastapi-instrumentator) |
-| Classical ML | scikit-learn, LightGBM, XGBoost, SHAP |
-| Deep Learning | PyTorch, HuggingFace Transformers, PEFT (LoRA) |
-| Dimensionality Reduction / Clustering | UMAP, HDBSCAN |
-| Graph Modeling | NetworkX |
-| Configuration | Pydantic Settings (`.env`-driven) |
-| Containerization | Docker, Docker Compose |
-| Testing | pytest, FastAPI `TestClient` |
+| Layer                                 | Technology                                                                                         |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| API Framework                         | [FastAPI](https://fastapi.tiangolo.com/) + [Uvicorn](https://www.uvicorn.org/)                     |
+| Primary Database                      | [MongoDB](https://www.mongodb.com/) via [Motor](https://motor.readthedocs.io/) (async)             |
+| Vector Database                       | [Milvus](https://milvus.io/) via `pymilvus`                                                        |
+| LLM / Embeddings                      | [Ollama](https://ollama.com/) (self-hosted inference)                                              |
+| Rate Limiting                         | [SlowAPI](https://github.com/laurentS/slowapi)                                                     |
+| Metrics                               | [prometheus-fastapi-instrumentator](https://github.com/trallnag/prometheus-fastapi-instrumentator) |
+| Classical ML                          | scikit-learn, LightGBM, XGBoost, SHAP                                                              |
+| Deep Learning                         | PyTorch, HuggingFace Transformers, PEFT (LoRA)                                                     |
+| Dimensionality Reduction / Clustering | UMAP, HDBSCAN                                                                                      |
+| Graph Modeling                        | NetworkX                                                                                           |
+| Configuration                         | Pydantic Settings (`.env`-driven)                                                                  |
+| Containerization                      | Docker, Docker Compose                                                                             |
+| Testing                               | pytest, FastAPI `TestClient`                                                                       |
 
 ## Folder Structure
 
@@ -226,27 +226,29 @@ LLM_MODEL=llama3               # example only
 Vela_API_KEY=your-secret-key-here
 ```
 
-| Variable | Required | Default | Notes |
-|---|---|---|---|
-| `MONGODB_URI` | Yes | â€” | Full MongoDB connection string |
-| `MONGODB_DB_NAME` | No | `Vela` | |
-| `MILVUS_URI` | Yes | â€” | |
-| `OLLAMA_URI` | No | â€” | Takes precedence over `OLLAMA_HOSTS` if both are set |
-| `OLLAMA_HOSTS` | No | â€” | Comma-separated failover list, tried in order at startup |
-| `EMBED_MODEL` | Yes | â€” | Ollama embedding model name |
-| `LLM_MODEL` | Yes | â€” | Ollama generation model name |
-| `Vela_API_KEY` | Yes | â€” | Enforced on every non-public route via `X-Vela-API-Key` |
+| Variable          | Required | Default | Notes                                                    |
+| ----------------- | -------- | ------- | -------------------------------------------------------- |
+| `MONGODB_URI`     | Yes      | â€”     | Full MongoDB connection string                           |
+| `MONGODB_DB_NAME` | No       | `Vela`  |                                                          |
+| `MILVUS_URI`      | Yes      | â€”     |                                                          |
+| `OLLAMA_URI`      | No       | â€”     | Takes precedence over `OLLAMA_HOSTS` if both are set     |
+| `OLLAMA_HOSTS`    | No       | â€”     | Comma-separated failover list, tried in order at startup |
+| `EMBED_MODEL`     | Yes      | â€”     | Ollama embedding model name                              |
+| `LLM_MODEL`       | Yes      | â€”     | Ollama generation model name                             |
+| `Vela_API_KEY`    | Yes      | â€”     | Enforced on every non-public route via `X-Vela-API-Key`  |
 
 The app **fails fast at startup** if any required variable is missing â€” this is deliberate, not a bug.
 
 ### Running Locally
 
 **Option A â€” Docker Compose (MongoDB only; bring your own Milvus/Ollama):**
+
 ```bash
 docker compose -f docker-compose_local.yaml up --build
 ```
 
 **Option B â€” Manual:**
+
 ```bash
 # 1. Seed canonical merchant data (optional but recommended)
 python scripts/seed.py
@@ -256,6 +258,7 @@ uvicorn app:app --reload --host 0.0.0.0 --port 8000
 ```
 
 **Verify it's up:**
+
 ```bash
 curl http://localhost:8000/health
 ```
@@ -267,7 +270,7 @@ curl http://localhost:8000/health
 This repository doesn't currently ship a linter config, formatter config, or CI pipeline â€” the recommendations below are conventional best practice for a project at this stage, not enforced tooling:
 
 1. **Branch from `main`** â€” `git checkout -b feature/your-change`.
-2. **Make focused commits** â€” one logical change per commit, with a message describing *why*, not just *what*.
+2. **Make focused commits** â€” one logical change per commit, with a message describing _why_, not just _what_.
 3. **Run the test suite** before opening a PR (see [Testing](#testing)) â€” note the suite currently requires live MongoDB and Milvus connections.
 4. **Cross-check `docs/16-known-issues-tech-debt.md`** before touching a file â€” several modules have documented, non-obvious defects; fixing one is a great first contribution.
 5. **Open a pull request** against `main` with a clear description of the change and its motivation.
@@ -289,12 +292,14 @@ The `pytest` suite uses FastAPI's `TestClient` against the real app object, so i
 ## Deployment
 
 **Build and run with Docker:**
+
 ```bash
 docker build -t Vela-backend .
 docker run -p 8000:8000 --env-file .env Vela-backend
 ```
 
 **Or via Compose** (`docker-compose_production.yaml` targets an external Coolify network â€” adapt for your own infrastructure):
+
 ```bash
 docker compose -f docker-compose_production.yaml up -d --build
 ```
@@ -305,31 +310,31 @@ docker compose -f docker-compose_production.yaml up -d --build
 
 All endpoints except `/health` and `/metrics` require the header `X-Vela-API-Key`.
 
-| Method | Endpoint | Purpose |
-|---|---|---|
-| `GET` | `/health` | Liveness + dependency status |
-| `GET` | `/metrics` | Prometheus metrics |
-| `POST` | `/v1/categorize` | Rule-based categorization |
-| `POST` | `/v1/resolve` | Noisy-text â†’ canonical merchant |
-| `POST` | `/v1/confidence/evaluate` | Confidence-wall evaluation |
-| `POST` | `/memory/update` | Record a merchant encounter |
-| `GET` | `/memory/profile/{name}` | Fetch a merchant's full trust profile |
-| `GET` | `/memory/state/{name}` | Fetch just trust state + frequency |
-| `GET` | `/v1/analytics/patterns/categories` | Spend by category |
-| `GET` | `/v1/analytics/patterns/merchants` | Top merchants by visits |
-| `GET` | `/v1/analytics/subscriptions` | Detected recurring subscriptions |
-| `GET` | `/v1/analytics/trends/mom` | Month-over-month spend trend |
-| `POST` | `/v1/analytics/anomaly/check` | Real-time anomaly check |
-| `POST` | `/v1/explain` | Grounded RAG explanation |
-| `POST` | `/v1/feedback/` | Submit human correction feedback |
-| `POST` | `/v1/pipelines/behavior/run`, `/run-all` | Run behavior profiling (one merchant / all) |
-| `POST` | `/v1/pipelines/embeddings/sync` | Generate + store Milvus embeddings for behavior patterns |
-| `POST` | `/v1/pipelines/decay/sweep` | Archive stale (180+ day) merchant profiles |
-| `POST` | `/v1/pipelines/graph/build` | Rebuild the in-memory knowledge graph |
-| `GET` | `/v1/pipelines/graph/neighborhood/{merchant_name}` | Ego-graph around a merchant |
-| `POST` | `/v1/pipelines/clustering/run` | Run the UMAP + HDBSCAN discovery pipeline |
-| `POST` | `/v1/observability/drift/analyze` | Drift analysis (stub) |
-| `GET` | `/v1/observability/reports/latest` | Latest drift report (stub) |
+| Method | Endpoint                                           | Purpose                                                  |
+| ------ | -------------------------------------------------- | -------------------------------------------------------- |
+| `GET`  | `/health`                                          | Liveness + dependency status                             |
+| `GET`  | `/metrics`                                         | Prometheus metrics                                       |
+| `POST` | `/v1/categorize`                                   | Rule-based categorization                                |
+| `POST` | `/v1/resolve`                                      | Noisy-text â†’ canonical merchant                        |
+| `POST` | `/v1/confidence/evaluate`                          | Confidence-wall evaluation                               |
+| `POST` | `/memory/update`                                   | Record a merchant encounter                              |
+| `GET`  | `/memory/profile/{name}`                           | Fetch a merchant's full trust profile                    |
+| `GET`  | `/memory/state/{name}`                             | Fetch just trust state + frequency                       |
+| `GET`  | `/v1/analytics/patterns/categories`                | Spend by category                                        |
+| `GET`  | `/v1/analytics/patterns/merchants`                 | Top merchants by visits                                  |
+| `GET`  | `/v1/analytics/subscriptions`                      | Detected recurring subscriptions                         |
+| `GET`  | `/v1/analytics/trends/mom`                         | Month-over-month spend trend                             |
+| `POST` | `/v1/analytics/anomaly/check`                      | Real-time anomaly check                                  |
+| `POST` | `/v1/explain`                                      | Grounded RAG explanation                                 |
+| `POST` | `/v1/feedback/`                                    | Submit human correction feedback                         |
+| `POST` | `/v1/pipelines/behavior/run`, `/run-all`           | Run behavior profiling (one merchant / all)              |
+| `POST` | `/v1/pipelines/embeddings/sync`                    | Generate + store Milvus embeddings for behavior patterns |
+| `POST` | `/v1/pipelines/decay/sweep`                        | Archive stale (180+ day) merchant profiles               |
+| `POST` | `/v1/pipelines/graph/build`                        | Rebuild the in-memory knowledge graph                    |
+| `GET`  | `/v1/pipelines/graph/neighborhood/{merchant_name}` | Ego-graph around a merchant                              |
+| `POST` | `/v1/pipelines/clustering/run`                     | Run the UMAP + HDBSCAN discovery pipeline                |
+| `POST` | `/v1/observability/drift/analyze`                  | Drift analysis (stub)                                    |
+| `GET`  | `/v1/observability/reports/latest`                 | Latest drift report (stub)                               |
 
 **Full per-endpoint documentation** â€” headers, validation rules, exact database queries, sequence diagrams, and example requests/responses â€” lives in [`docs/api/`](./docs/api/README.md).
 
@@ -338,17 +343,20 @@ All endpoints except `/health` and `/metrics` require the header `X-Vela-API-Key
 Vela is a headless JSON API with no bundled frontend, so there's no UI to screenshot. The closest equivalent:
 
 **Interactive API docs** â€” every endpoint is explorable and testable live at `/docs` (Swagger UI) and `/redoc` once the server is running:
+
 ```
 http://localhost:8000/docs
 ```
 
 **Example interaction:**
+
 ```bash
 $ curl -s -X POST http://localhost:8000/v1/resolve \
     -H "X-Vela-API-Key: your-secret-key-here" \
     -H "Content-Type: application/json" \
     -d '{"text": "UPI/CR/3152671239/BUNDL TECHNOLOGIES/HDFC"}'
 ```
+
 ```json
 {
   "raw_text": "UPI/CR/3152671239/BUNDL TECHNOLOGIES/HDFC",
@@ -404,5 +412,6 @@ For the complete technical documentation set, start at [`docs/README.md`](./docs
 
 </div>
 
-#   V e l a  
+#   V e l a 
+ 
  
