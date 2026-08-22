@@ -37,6 +37,7 @@ class MongoDB:
         cls.refresh_tokens = cls.db.get_collection("refresh_tokens")
         cls.statements = cls.db.get_collection("statements")
         cls.jobs = cls.db.get_collection("jobs")
+        cls.canonical_records = cls.db.get_collection("canonical_records")
 
         # GridFS: stores the original uploaded PDF (repositories/statement_repository.py).
         # Reuses this same Mongo connection - no new infrastructure - see
@@ -108,6 +109,17 @@ class MongoDB:
             await cls.statements.create_index([("user_id", 1), ("processing_status", 1)], background=True)
             await cls.jobs.create_index("user_id", background=True)
             await cls.jobs.create_index("resource_id", background=True)
+
+            # Canonical records (repositories/canonical_record_repository.py).
+            # Unique index on (user_id, source, source_record_id) ensures each
+            # source can only produce one canonical record per original ID.
+            await cls.canonical_records.create_index(
+                [("user_id", 1), ("source", 1), ("source_record_id", 1)],
+                unique=True,
+                background=True,
+            )
+            await cls.canonical_records.create_index([("user_id", 1), ("timestamp", -1)], background=True)
+            await cls.canonical_records.create_index("source", background=True)
 
             logger.info("MongoDB indexes ensured.")
         except Exception:
