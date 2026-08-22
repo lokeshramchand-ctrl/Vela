@@ -9,7 +9,8 @@ from embeddings.vectorizer import vectorizer
 from engines.rule_engine import rule_engine
 from insights.statement_insights import statement_insight_generator
 from milvus.insert_vectors import vector_store
-from models.schemas import BehaviorPattern, Statement, Transaction, TransactionCategory, TransactionType
+from models.schemas import BehaviorPattern, CanonicalFinancialRecord, Statement, Transaction, TransactionCategory, TransactionType
+from repositories.canonical_record_repository import canonical_record_repo
 from repositories.job_repository import job_repo
 from repositories.statement_repository import statement_repo
 from repositories.transaction_repository import transaction_repo
@@ -50,10 +51,11 @@ class StatementService:
             parsed_records = statement_parser.parse_transactions(full_text)
 
             await job_repo.update_progress(job_id, "categorizing", 20)
-            transactions = self._build_transactions(statement.user_id, statement_id, parsed_records)
+            transactions, canonical_records = self._build_transactions(statement.user_id, statement_id, parsed_records)
 
             await job_repo.update_progress(job_id, "persisting_transactions", 40)
             await transaction_repo.bulk_upsert(transactions)
+            await canonical_record_repo.bulk_upsert(canonical_records)
 
             await job_repo.update_progress(job_id, "profiling_merchants", 55)
             await self._refresh_behavior_profiles(statement_id)
@@ -97,8 +99,9 @@ class StatementService:
 
     def _build_transactions(
         self, user_id: str, statement_id: str, parsed_records: list[ParsedTransaction]
-    ) -> list[Transaction]:
+    ) -> tuple[list[Transaction], list[CanonicalFinancialRecord]]:
         transactions = []
+        canonical_records = []
         for record in parsed_records:
             if record.direction == "Paid to":
                 result = rule_engine.categorize(record.counterparty_raw)
@@ -113,23 +116,45 @@ class StatementService:
                 category = TransactionCategory.INCOME.value
                 transaction_type = TransactionType.CREDIT
 
-            transactions.append(
-                Transaction(
-                    raw_text=f"{record.direction} {record.counterparty_raw}",
-                    merchant=merchant,
-                    amount=record.amount,
-                    category=category,
-                    user_id=user_id,
-                    timestamp=record.timestamp,
-                    statement_id=statement_id,
-                    transaction_type=transaction_type,
-                    counterparty_raw=record.counterparty_raw,
-                    reference_number=record.reference_number,
-                    bank=record.bank,
-                    account_last4=record.account_last4,
-                )
+            txn = Transaction(
+                raw_text=f"{record.direction} {record.counterparty_raw}",
+                merchant=merchant,
+                amount=record.amount,
+                category=category,
+                user_id=user_id,
+                timestamp=record.timestamp,
+                statement_id=statement_id,
+                transaction_type=transaction_type,
+                counterparty_raw=record.counterparty_raw,
+                reference_number=record.reference_number,
+                bank=record.bank,
+                account_last4=record.account_last4,
             )
-        return transactions
+            transactions.append(txn)
+
+            # Populate canonical record alongside transaction with full provenance
+            canonical = CanonicalFinancialRecord(
+                source="gpay",
+                source_record_id=record.reference_number,
+                user_id=user_id,
+                timestamp=record.timestamp,
+                amount=record.amount,
+                merchant_raw=record.counterparty_raw,
+                merchant_normalized=merchant,
+                transaction_type=transaction_type,
+                category=category,
+                reference_id=record.reference_number,
+                description=f"{record.direction} {record.counterparty_raw}",
+                metadata={
+                    "bank": record.bank,
+                    "account_last4": record.account_last4,
+                    "direction": record.direction,
+                    "statement_id": statement_id,
+                },
+            )
+            canonical_records.append(canonical)
+
+        return transactions, canonical_records
 
     async def _refresh_behavior_profiles(self, statement_id: str) -> None:
         """Reuses behaviour/behavior_engine.py verbatim - the same per-
