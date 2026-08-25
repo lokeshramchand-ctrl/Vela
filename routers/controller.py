@@ -31,6 +31,15 @@ class ExceptionsListResponse(BaseModel):
 class ResolveExceptionRequest(BaseModel):
     approved: bool
 
+class CashPositionResponse(BaseModel):
+    opening_balance: float
+    verified_inflows: float
+    verified_outflows: float
+    expected_closing_balance: float
+    reported_closing_balance: float
+    variance: float
+    contributing_exceptions: List[TransactionExceptionResponse]
+
 @router.get("/stats", response_model=ReconciliationStatsResponse)
 async def get_reconciliation_stats():
     """
@@ -90,6 +99,33 @@ async def get_exceptions():
                 reason="Could be Uber Eats vs regular Uber. Amount variance is within 1%.",
             ),
         ]
+    )
+
+@router.get("/cash-position", response_model=CashPositionResponse)
+async def get_cash_position():
+    """
+    Reconciles the period's cash position: opening balance plus verified
+    inflows minus verified outflows gives the expected closing balance,
+    compared against the bank-reported closing balance. Any variance is
+    attributed to the still-open exceptions that could explain it.
+    """
+    opening_balance = 50000.0
+    verified_inflows = 62300.0
+    verified_outflows = 29800.0
+    expected_closing_balance = opening_balance + verified_inflows - verified_outflows
+    reported_closing_balance = 80000.0
+    variance = reported_closing_balance - expected_closing_balance
+
+    contributing = (await get_exceptions()).exceptions
+
+    return CashPositionResponse(
+        opening_balance=opening_balance,
+        verified_inflows=verified_inflows,
+        verified_outflows=verified_outflows,
+        expected_closing_balance=expected_closing_balance,
+        reported_closing_balance=reported_closing_balance,
+        variance=variance,
+        contributing_exceptions=contributing,
     )
 
 @router.post("/exceptions/{exception_id}/resolve")
