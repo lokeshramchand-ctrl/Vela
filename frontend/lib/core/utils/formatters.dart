@@ -36,6 +36,9 @@ String formatPeriodRange(DateTime start, DateTime end) {
 /// `28 JUN · SUN`
 String formatDayHeader(DateTime date) => '${date.day} ${_months[date.month - 1]} · ${_weekdays[date.weekday - 1]}';
 
+/// `28 JUN 2026`
+String formatDate(DateTime date) => '${date.day} ${_months[date.month - 1]} ${date.year}';
+
 /// `04:47 PM`
 String formatTime12h(DateTime dt) {
   final hour12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;

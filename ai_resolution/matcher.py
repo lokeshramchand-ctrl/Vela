@@ -46,6 +46,7 @@ class ExceptionReason(str, Enum):
     AMBIGUOUS_CANDIDATES = "ambiguous_candidates"
     CONFLICTING_SIGNALS = "conflicting_signals"
     MISSING_CONTEXT = "missing_context"
+    DIRECTION_MISMATCH = "direction_mismatch"
 
 
 @dataclass
@@ -75,10 +76,17 @@ class ScoringFactors:
                 "trust_state_factor": 0.10,
             }
 
+        # Weight keys ("name_similarity", "trust_state_factor", ...) match
+        # ScoringFactors' field names exactly - previously this stripped a
+        # "_factor" suffix before the lookup, which only ever matched a
+        # non-existent "trust_state" attribute and silently dropped
+        # trust_state_factor's entire 0.10 weight from every aggregate,
+        # capping the best possible score at 0.90 regardless of how strong
+        # every other signal was.
         total = sum(
-            getattr(self, k.replace("_factor", ""), 0) * v
+            getattr(self, k, 0) * v
             for k, v in weights.items()
-            if k.replace("_factor", "") in self.__dict__
+            if k in self.__dict__
         )
         return min(1.0, max(0.0, total))
 
@@ -93,6 +101,7 @@ class EntityCandidate:
     requires_human_review: bool = False
     confidence_wall: Optional[ConfidenceWall] = None
     exception_reason: Optional[ExceptionReason] = None
+    direction_conflict: bool = False
 
     def to_dict(self) -> dict:
         """Serialize to JSON-compatible dict."""
@@ -110,6 +119,7 @@ class EntityCandidate:
             "requires_human_review": self.requires_human_review,
             "confidence_wall": self.confidence_wall,
             "exception_reason": self.exception_reason,
+            "direction_conflict": self.direction_conflict,
         }
 
 
@@ -200,27 +210,76 @@ class NameSimilarityMatcher:
         """
         lev = self.levenshtein_ratio(query, candidate)
         abbrev = 1.0 if self.is_abbreviation_match(query, candidate) else 0.0
+        # A byte-identical name (modulo whitespace/case) is the strongest
+        # possible signal this matcher can see - the 'exact_alias' weight
+        # exists specifically to credit it, separately from Levenshtein
+        # (which already returns 1.0 for identical strings, but only carries
+        # its own 0.50 weight) and from the abbreviation stub (which only
+        # covers a hardcoded few merchants).
+        exact = 1.0 if query.strip().upper() == candidate.strip().upper() else 0.0
 
         # Weighted sum
         score = (
             lev * self.weights["levenshtein"]
             + abbrev * self.weights["abbreviation"]
+            + exact * self.weights["exact_alias"]
         )
         return min(1.0, score)
 
 
 class AmountMatcher:
-    """Matches transactions by amount with configurable tolerance."""
+    """Matches transactions by amount with a two-tier tolerance: an absolute
+    floor for rounding/FX noise, then a proportional band for larger
+    transactions.
 
-    def __init__(self, exact_weight: float = 1.0, tolerance_pct: float = 0.05):
+    Percentage-only tolerance (the previous design) is systematically harsher
+    on small transactions than large ones for the exact same absolute noise:
+    a Rs 1 diff is 10% of a Rs 10 fare but 0.02% of a Rs 5,000 purchase, so
+    only the latter survived a flat 5% band (EDGE_CASE_REPORT.md finding 2).
+    Real-world rounding/FX noise is an absolute quantity, not a fraction of
+    the transaction - so it needs an absolute floor that applies regardless
+    of amount, on top of (not instead of) the existing proportional band for
+    larger, non-trivial discrepancies.
+
+    Four deterministic tiers, evaluated in order:
+      1. Exact match                                -> exact_weight (1.0)
+      2. abs(diff) <= absolute_floor                 -> near_exact_weight (0.85)
+         (rounding/FX noise - an absolute quantity, independent of amount)
+      3. abs(diff) <= max(absolute_floor, amount * tolerance_pct)
+                                                       -> tolerance_weight (0.7)
+         (proportional band - meaningful for larger transactions)
+      4. anything else                               -> 0.0 (a real mismatch)
+
+    This only ever *adds* credit for small absolute diffs that used to score
+    0 - it never grants credit to a discrepancy that already failed the
+    proportional band, so it cannot turn a large financial mismatch into a
+    high-confidence match.
+    """
+
+    def __init__(
+        self,
+        exact_weight: float = 1.0,
+        tolerance_pct: float = 0.05,
+        absolute_floor: float = 2.0,
+        near_exact_weight: float = 0.85,
+        tolerance_weight: float = 0.7,
+    ):
         """Initialize with match strategy.
 
         Args:
             exact_weight: Score for exact amount match (default 1.0).
-            tolerance_pct: Fractional tolerance (e.g., 0.05 = ±5%).
+            tolerance_pct: Fractional tolerance for the proportional band
+                (e.g., 0.05 = +/-5%).
+            absolute_floor: Absolute rupee tolerance applied regardless of
+                amount, for rounding/FX noise (default Rs 2).
+            near_exact_weight: Score for a diff within absolute_floor.
+            tolerance_weight: Score for a diff within the proportional band.
         """
         self.exact_weight = exact_weight
         self.tolerance_pct = tolerance_pct
+        self.absolute_floor = absolute_floor
+        self.near_exact_weight = near_exact_weight
+        self.tolerance_weight = tolerance_weight
 
     def score(self, query_amount: Optional[float], candidate_amount: Optional[float]) -> float:
         """Score match between two amounts.
@@ -235,12 +294,17 @@ class AmountMatcher:
         if query_amount is None or candidate_amount is None:
             return 0.5  # Neutral if missing data
 
-        if query_amount == candidate_amount:
+        diff = abs(query_amount - candidate_amount)
+
+        if diff == 0:
             return self.exact_weight
 
-        tolerance = query_amount * self.tolerance_pct
-        if abs(query_amount - candidate_amount) <= tolerance:
-            return 0.7  # Partial credit for within-tolerance match
+        if diff <= self.absolute_floor:
+            return self.near_exact_weight
+
+        tolerance = max(self.absolute_floor, query_amount * self.tolerance_pct)
+        if diff <= tolerance:
+            return self.tolerance_weight
 
         return 0.0
 
@@ -282,6 +346,22 @@ class TemporalProximityMatcher:
         return 0.0
 
 
+def _directions_conflict(query_direction: Optional[str], candidate_direction: Optional[str]) -> bool:
+    """True only when both directions are known and disagree.
+
+    Unknown direction (None on either side) is not a conflict - it's missing
+    data, and the existing confidence math already handles missing data
+    conservatively. A conflict is only ever raised when we *know* one side
+    is money out and the other is money in, e.g. a debit being proposed as
+    a match for a credit (a refund/reversal pair), which must never be
+    treated as "the same transaction" no matter how well name/amount/date
+    line up.
+    """
+    if query_direction is None or candidate_direction is None:
+        return False
+    return query_direction.strip().upper() != candidate_direction.strip().upper()
+
+
 class AIEntityMatcher:
     """
     Main orchestrator for AI-assisted entity resolution with confidence walls.
@@ -320,6 +400,8 @@ class AIEntityMatcher:
         candidate_date: Optional[datetime] = None,
         historical_encounters: int = 0,
         trust_state: Optional[str] = None,
+        query_direction: Optional[str] = None,
+        candidate_direction: Optional[str] = None,
     ) -> EntityCandidate:
         """Score a single candidate merchant.
 
@@ -332,9 +414,16 @@ class AIEntityMatcher:
             candidate_date: Date of candidate txn (if known).
             historical_encounters: How many times user has seen this merchant.
             trust_state: Phase 4 trust state (EPHEMERAL, TEMPORARY, PERMANENT).
+            query_direction: Direction of the query txn, e.g. "DEBIT"/"CREDIT"
+                (matches models.schemas.TransactionType values). None if unknown.
+            candidate_direction: Direction of the candidate txn. None if unknown.
 
         Returns:
-            EntityCandidate with scored factors.
+            EntityCandidate with scored factors. If both directions are known
+            and disagree, `direction_conflict` is set - this is a hard
+            pre-filter enforced by `route_by_confidence_wall`, not a fuzzy
+            score penalty, so a debit can never auto-match a credit no
+            matter how strong the other signals are.
         """
         factors = ScoringFactors()
 
@@ -378,6 +467,7 @@ class AIEntityMatcher:
             confidence=confidence,
             scoring_factors=factors,
             requires_human_review=requires_review,
+            direction_conflict=_directions_conflict(query_direction, candidate_direction),
         )
 
     def rank_candidates(
@@ -401,6 +491,14 @@ class AIEntityMatcher:
         Returns:
             ConfidenceWall enum indicating routing decision.
         """
+        # Hard pre-filter: a known direction conflict (debit vs. credit)
+        # overrides the confidence score entirely. This must never be
+        # AUTO_MATCH or even HUMAN_REVIEW-by-default-confidence - it's routed
+        # straight to EXCEPTION regardless of how strong name/amount/date
+        # look, since those signals are exactly what make refund/reversal
+        # pairs look deceptively like a match.
+        if candidate.direction_conflict:
+            return ConfidenceWall.EXCEPTION
         if candidate.confidence >= self.high_confidence_threshold:
             return ConfidenceWall.AUTO_MATCH
         elif candidate.confidence >= self.medium_confidence_threshold:
@@ -423,6 +521,9 @@ class AIEntityMatcher:
         wall = self.route_by_confidence_wall(candidate)
         if wall != ConfidenceWall.EXCEPTION:
             return None
+
+        if candidate.direction_conflict:
+            return ExceptionReason.DIRECTION_MISMATCH
 
         # Determine specific reason
         if candidate.confidence < 0.40:

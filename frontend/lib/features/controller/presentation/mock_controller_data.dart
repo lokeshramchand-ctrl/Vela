@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../domain/reconciliation_stats.dart';
 import '../domain/exception.dart';
+import '../domain/cash_position.dart';
 import 'dart:async';
 
 class MockControllerRepository {
@@ -56,6 +57,24 @@ class MockControllerRepository {
         reason: 'Could be Uber Eats vs regular Uber. Amount variance is within 1%.',
       ),
     ];
+  }
+
+  static Future<CashPosition> fetchCashPosition() async {
+    await Future.delayed(const Duration(milliseconds: 900));
+    const openingBalance = 50000.0;
+    const verifiedInflows = 62300.0;
+    const verifiedOutflows = 29800.0;
+    const expectedClosingBalance = openingBalance + verifiedInflows - verifiedOutflows;
+    const reportedClosingBalance = 80000.0;
+    return CashPosition(
+      openingBalance: openingBalance,
+      verifiedInflows: verifiedInflows,
+      verifiedOutflows: verifiedOutflows,
+      expectedClosingBalance: expectedClosingBalance,
+      reportedClosingBalance: reportedClosingBalance,
+      variance: reportedClosingBalance - expectedClosingBalance,
+      contributingExceptions: await fetchExceptions(),
+    );
   }
 
   static Future<void> resolveException(String exceptionId, bool approved) async {

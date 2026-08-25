@@ -34,13 +34,12 @@ class _ExceptionDetailScreenState extends ConsumerState<ExceptionDetailScreen> {
         backgroundColor: AppColors.paper,
         elevation: 0,
         title: const Text('EXCEPTION'),
-        titleTextStyle: AppTypography.title3.copyWith(
-          color: AppColors.textPrimary,
-          fontWeight: FontWeight.w600,
+        titleTextStyle: AppTypography.navTitle15.copyWith(
+          color: AppColors.onLight,
         ),
       ),
       body: SingleChildScrollView(
-        padding: EdgeInsets.all(AppSpacing.lg),
+        padding: EdgeInsets.all(AppSpacing.gutter),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -70,7 +69,7 @@ class _ExceptionDetailScreenState extends ConsumerState<ExceptionDetailScreen> {
                 setState(() => _isResolving = true);
                 await ref.read(controllerProvider.notifier)
                   .resolveException(widget.exception.id, true);
-                if (mounted) {
+                if (context.mounted) {
                   context.pop();
                 }
               },
@@ -78,7 +77,7 @@ class _ExceptionDetailScreenState extends ConsumerState<ExceptionDetailScreen> {
                 setState(() => _isResolving = true);
                 await ref.read(controllerProvider.notifier)
                   .resolveException(widget.exception.id, false);
-                if (mounted) {
+                if (context.mounted) {
                   context.pop();
                 }
               },
@@ -107,9 +106,9 @@ class _SourceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.cardBackground,
-        borderRadius: AppRadius.md,
-        border: Border.all(color: AppColors.divider, width: 1),
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: AppColors.hairlineLight, width: 1),
       ),
       padding: EdgeInsets.all(AppSpacing.md),
       child: Column(
@@ -117,9 +116,8 @@ class _SourceCard extends StatelessWidget {
         children: [
           Text(
             source,
-            style: AppTypography.caption.copyWith(
-              color: AppColors.textSecondary,
-              fontWeight: FontWeight.w600,
+            style: AppTypography.footnote12.copyWith(
+              color: AppColors.onLightMuted,
             ),
           ),
           SizedBox(height: AppSpacing.md),
@@ -131,25 +129,23 @@ class _SourceCard extends StatelessWidget {
                 children: [
                   Text(
                     merchant,
-                    style: AppTypography.body1.copyWith(
-                      color: AppColors.textPrimary,
-                      fontWeight: FontWeight.w600,
+                    style: AppTypography.rowLabel145.copyWith(
+                      color: AppColors.onLight,
                     ),
                   ),
                   SizedBox(height: AppSpacing.xs),
                   Text(
-                    Formatters.formatDate(date),
-                    style: AppTypography.caption.copyWith(
-                      color: AppColors.textSecondary,
+                    formatDate(date),
+                    style: AppTypography.footnote12.copyWith(
+                      color: AppColors.onLightMuted,
                     ),
                   ),
                 ],
               ),
               Text(
-                Formatters.formatCurrency(amount),
-                style: AppTypography.title3.copyWith(
-                  color: AppColors.textPrimary,
-                  fontWeight: FontWeight.w600,
+                formatCurrency(amount),
+                style: AppTypography.amountMedium19.copyWith(
+                  color: AppColors.onLight,
                 ),
               ),
             ],
@@ -191,24 +187,22 @@ class _IssueSection extends StatelessWidget {
           children: [
             Text(
               'Reason:',
-              style: AppTypography.caption.copyWith(
-                color: AppColors.textSecondary,
-                fontWeight: FontWeight.w600,
+              style: AppTypography.footnote12.copyWith(
+                color: AppColors.onLightMuted,
               ),
             ),
             SizedBox(height: AppSpacing.xs),
             Container(
               decoration: BoxDecoration(
-                color: AppColors.cardBackground,
-                borderRadius: AppRadius.md,
-                border: Border.all(color: AppColors.divider, width: 1),
+                color: AppColors.card,
+                borderRadius: BorderRadius.circular(AppRadius.card),
+                border: Border.all(color: AppColors.hairlineLight, width: 1),
               ),
               padding: EdgeInsets.all(AppSpacing.md),
               child: Text(
                 reason,
-                style: AppTypography.body2.copyWith(
-                  color: AppColors.textPrimary,
-                  height: 1.5,
+                style: AppTypography.cardBody15.copyWith(
+                  color: AppColors.onLight,
                 ),
               ),
             ),
@@ -235,17 +229,16 @@ class _InfoRow extends StatelessWidget {
       children: [
         Text(
           label,
-          style: AppTypography.caption.copyWith(
-            color: AppColors.textSecondary,
-            fontWeight: FontWeight.w600,
+          style: AppTypography.footnote12.copyWith(
+            color: AppColors.onLightMuted,
           ),
         ),
         SizedBox(width: AppSpacing.sm),
         Expanded(
           child: Text(
             value,
-            style: AppTypography.body2.copyWith(
-              color: AppColors.textPrimary,
+            style: AppTypography.cardBody15.copyWith(
+              color: AppColors.onLight,
             ),
           ),
         ),
@@ -268,27 +261,21 @@ class _ActionButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      gap: AppSpacing.md,
+      spacing: AppSpacing.md,
       children: [
         Expanded(
-          child: AppButton.secondary(
+          child: SecondaryPillButton(
+            label: 'Keep Exception',
+            foreground: AppColors.onLight,
+            borderColor: AppColors.hairlineLight,
             onPressed: isResolving ? null : onKeepException,
-            child: const Text('Keep Exception'),
           ),
         ),
         Expanded(
-          child: AppButton.primary(
+          child: PrimaryPillButton(
+            label: 'Resolve',
+            loading: isResolving,
             onPressed: isResolving ? null : onResolve,
-            child: isResolving
-              ? SizedBox(
-                height: 20,
-                width: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation(AppColors.accentGreen),
-                ),
-              )
-              : const Text('Resolve'),
           ),
         ),
       ],
