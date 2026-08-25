@@ -1,5 +1,8 @@
 """
-Unit tests for Wave 4 AI Entity Resolution Matcher
+Unit tests for Wave 4-5 AI Entity Resolution Matcher
+
+Wave 4: Semantic candidate generation and confidence scoring
+Wave 5: Confidence walls and exception management
 """
 
 import unittest
@@ -11,6 +14,8 @@ from .matcher import (
     TemporalProximityMatcher,
     EntityCandidate,
     ScoringFactors,
+    ConfidenceWall,
+    ExceptionReason,
 )
 
 
@@ -260,6 +265,131 @@ class TestAIEntityMatcher(unittest.TestCase):
         """Empty candidate list should return None."""
         decision = self.matcher.propose_decision([])
         self.assertIsNone(decision)
+
+
+class TestConfidenceWalls(unittest.TestCase):
+    """Test Wave 5 confidence wall routing."""
+
+    def setUp(self):
+        self.matcher = AIEntityMatcher(
+            high_confidence_threshold=0.90,
+            medium_confidence_threshold=0.65,
+        )
+
+    def test_route_auto_match_high_confidence(self):
+        """Confidence > 0.90 should route to AUTO_MATCH."""
+        candidate = EntityCandidate(
+            merchant="Uber",
+            confidence=0.95,
+            scoring_factors=ScoringFactors(name_similarity=0.95),
+        )
+        wall = self.matcher.route_by_confidence_wall(candidate)
+        self.assertEqual(wall, ConfidenceWall.AUTO_MATCH)
+
+    def test_route_human_review_medium_confidence(self):
+        """Confidence 0.65-0.90 should route to HUMAN_REVIEW."""
+        candidate = EntityCandidate(
+            merchant="Unknown Merchant",
+            confidence=0.78,
+            scoring_factors=ScoringFactors(name_similarity=0.72),
+        )
+        wall = self.matcher.route_by_confidence_wall(candidate)
+        self.assertEqual(wall, ConfidenceWall.HUMAN_REVIEW)
+
+    def test_route_exception_low_confidence(self):
+        """Confidence < 0.65 should route to EXCEPTION."""
+        candidate = EntityCandidate(
+            merchant="Unclear",
+            confidence=0.52,
+            scoring_factors=ScoringFactors(name_similarity=0.45),
+        )
+        wall = self.matcher.route_by_confidence_wall(candidate)
+        self.assertEqual(wall, ConfidenceWall.EXCEPTION)
+
+    def test_detect_exception_reason_low_confidence(self):
+        """Very low confidence should flag LOW_CONFIDENCE reason."""
+        candidate = EntityCandidate(
+            merchant="Unknown",
+            confidence=0.35,
+            scoring_factors=ScoringFactors(name_similarity=0.30),
+        )
+        reason = self.matcher.detect_exception_reason(candidate, [candidate])
+        self.assertEqual(reason, ExceptionReason.LOW_CONFIDENCE)
+
+    def test_detect_exception_reason_weak_name_match(self):
+        """Poor name similarity should flag WEAK_NAME_MATCH."""
+        candidate = EntityCandidate(
+            merchant="Dissimilar",
+            confidence=0.62,
+            scoring_factors=ScoringFactors(
+                name_similarity=0.40,
+                amount_match=0.85,
+                temporal_proximity=0.90,
+            ),
+        )
+        reason = self.matcher.detect_exception_reason(candidate, [candidate])
+        self.assertEqual(reason, ExceptionReason.WEAK_NAME_MATCH)
+
+    def test_detect_ambiguity_similar_candidates(self):
+        """Candidates within 5% confidence should be ambiguous."""
+        candidates = [
+            EntityCandidate(
+                merchant="Option A",
+                confidence=0.82,
+                scoring_factors=ScoringFactors(),
+            ),
+            EntityCandidate(
+                merchant="Option B",
+                confidence=0.80,
+                scoring_factors=ScoringFactors(),
+            ),
+        ]
+        is_ambiguous = self.matcher.detect_ambiguity(candidates)
+        self.assertTrue(is_ambiguous)
+
+    def test_detect_ambiguity_clear_winner(self):
+        """Clear confidence gap should not be ambiguous."""
+        candidates = [
+            EntityCandidate(
+                merchant="Clear Winner",
+                confidence=0.95,
+                scoring_factors=ScoringFactors(),
+            ),
+            EntityCandidate(
+                merchant="Far Behind",
+                confidence=0.65,
+                scoring_factors=ScoringFactors(),
+            ),
+        ]
+        is_ambiguous = self.matcher.detect_ambiguity(candidates)
+        self.assertFalse(is_ambiguous)
+
+    def test_propose_decision_with_confidence_wall(self):
+        """Proposed decision should include confidence wall routing."""
+        candidates = [
+            EntityCandidate(
+                merchant="Uber",
+                confidence=0.93,
+                scoring_factors=ScoringFactors(name_similarity=0.92),
+            ),
+        ]
+        decision = self.matcher.propose_decision(candidates)
+        self.assertEqual(decision.confidence_wall, ConfidenceWall.AUTO_MATCH)
+        self.assertFalse(decision.requires_human_review)
+
+    def test_propose_decision_exception_with_reason(self):
+        """Exception routing should include reason."""
+        candidates = [
+            EntityCandidate(
+                merchant="Ambiguous",
+                confidence=0.58,
+                scoring_factors=ScoringFactors(name_similarity=0.40),
+            ),
+        ]
+        decision = self.matcher.propose_decision(candidates)
+        self.assertEqual(decision.confidence_wall, ConfidenceWall.EXCEPTION)
+        self.assertIsNotNone(decision.exception_reason)
+        self.assertTrue(decision.requires_human_review)
 
 
 if __name__ == "__main__":

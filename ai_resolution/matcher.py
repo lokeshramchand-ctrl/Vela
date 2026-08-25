@@ -1,17 +1,19 @@
 """
-Wave 4: AI-Assisted Entity Resolution Matcher
+Wave 5: Confidence Walls + Exception Management
 
-Handles ambiguous merchant-matching cases using semantic similarity,
-temporal proximity, and historical context. Proposes candidates but
-does not auto-decide — all matches require human review or explicit
-acceptance by downstream logic.
+Extends Wave 4 with deterministic confidence routing:
+  - HIGH CONFIDENCE (>0.90): AUTO-MATCH (no human review)
+  - MEDIUM CONFIDENCE (0.65-0.90): HUMAN_REVIEW (needs approval)
+  - LOW CONFIDENCE (<0.65): EXCEPTION (unresolved, requires escalation)
+
+Never force a match simply because the system has to produce an answer.
 
 Architecture:
-  1. Query arrives: noisy merchant text + context (amount, date, user)
-  2. Candidate generation: similar merchants from deterministic rules
-  3. Scoring: apply heuristics (name, amount, temporal, historical)
-  4. Ranking: sort by confidence, filter by threshold
-  5. Proposal: return candidates with reasoning (not auto-accept)
+  1. Score candidates (Wave 4 pipeline)
+  2. Route by confidence wall
+  3. Track exceptions and rejection patterns
+  4. Flag high-risk scenarios (ambiguous, multiple competitors)
+  5. Escalate to human judgment when uncertain
 """
 
 from dataclasses import dataclass, field
@@ -28,6 +30,22 @@ class ConfidenceSource(str, Enum):
     TEMPORAL_PROXIMITY = "temporal_proximity"
     HISTORICAL_CONTEXT = "historical_context"
     TRUST_STATE = "trust_state"
+
+
+class ConfidenceWall(str, Enum):
+    """Deterministic routing based on confidence thresholds."""
+    AUTO_MATCH = "auto_match"  # >0.90: trust the system
+    HUMAN_REVIEW = "human_review"  # 0.65-0.90: needs approval
+    EXCEPTION = "exception"  # <0.65: unresolved, escalate
+
+
+class ExceptionReason(str, Enum):
+    """Categorize why a match was routed to exception."""
+    LOW_CONFIDENCE = "low_confidence"
+    WEAK_NAME_MATCH = "weak_name_match"
+    AMBIGUOUS_CANDIDATES = "ambiguous_candidates"
+    CONFLICTING_SIGNALS = "conflicting_signals"
+    MISSING_CONTEXT = "missing_context"
 
 
 @dataclass
@@ -67,12 +85,14 @@ class ScoringFactors:
 
 @dataclass
 class EntityCandidate:
-    """A proposed merchant match with confidence and reasoning."""
+    """A proposed merchant match with confidence and routing decision."""
     merchant: str
     confidence: float
     scoring_factors: ScoringFactors
     evidence: Dict = field(default_factory=dict)
     requires_human_review: bool = False
+    confidence_wall: Optional[ConfidenceWall] = None
+    exception_reason: Optional[ExceptionReason] = None
 
     def to_dict(self) -> dict:
         """Serialize to JSON-compatible dict."""
@@ -88,6 +108,8 @@ class EntityCandidate:
             },
             "evidence": self.evidence,
             "requires_human_review": self.requires_human_review,
+            "confidence_wall": self.confidence_wall,
+            "exception_reason": self.exception_reason,
         }
 
 
@@ -104,10 +126,13 @@ class ResolutionRequest:
 
 @dataclass
 class ResolutionResponse:
-    """Output from the AI entity resolver."""
+    """Output from the AI entity resolver with confidence wall routing."""
     query: str
     candidates: List[EntityCandidate]
     proposed_decision: Optional[EntityCandidate] = None
+    routing_decision: Optional[ConfidenceWall] = None
+    exceptions: List[str] = field(default_factory=list)
+    is_ambiguous: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -118,6 +143,9 @@ class ResolutionResponse:
                 if self.proposed_decision
                 else None
             ),
+            "routing_decision": self.routing_decision,
+            "exceptions": self.exceptions,
+            "is_ambiguous": self.is_ambiguous,
         }
 
 
@@ -256,11 +284,16 @@ class TemporalProximityMatcher:
 
 class AIEntityMatcher:
     """
-    Main orchestrator for AI-assisted entity resolution.
+    Main orchestrator for AI-assisted entity resolution with confidence walls.
+
+    Extends Wave 4 with deterministic confidence routing:
+      HIGH CONFIDENCE (>0.90) → AUTO-MATCH (trust the system)
+      MEDIUM CONFIDENCE (0.65-0.90) → HUMAN_REVIEW (needs approval)
+      LOW CONFIDENCE (<0.65) → EXCEPTION (escalate)
 
     Does NOT perform the actual database lookups or call the deterministic
     matcher — those are responsibilities of routers/services that use this.
-    This class focuses on *scoring* candidates once they've been nominated.
+    This class focuses on *scoring* candidates and routing by confidence.
     """
 
     def __init__(
@@ -268,10 +301,14 @@ class AIEntityMatcher:
         name_matcher: Optional[NameSimilarityMatcher] = None,
         amount_matcher: Optional[AmountMatcher] = None,
         temporal_matcher: Optional[TemporalProximityMatcher] = None,
+        high_confidence_threshold: float = 0.90,
+        medium_confidence_threshold: float = 0.65,
     ):
         self.name_matcher = name_matcher or NameSimilarityMatcher()
         self.amount_matcher = amount_matcher or AmountMatcher()
         self.temporal_matcher = temporal_matcher or TemporalProximityMatcher()
+        self.high_confidence_threshold = high_confidence_threshold
+        self.medium_confidence_threshold = medium_confidence_threshold
 
     def score_candidate(
         self,
@@ -356,23 +393,98 @@ class AIEntityMatcher:
         """Keep only candidates above confidence threshold."""
         return [c for c in candidates if c.confidence >= threshold]
 
+    def route_by_confidence_wall(
+        self, candidate: EntityCandidate
+    ) -> ConfidenceWall:
+        """Deterministically route candidate by confidence threshold.
+
+        Returns:
+            ConfidenceWall enum indicating routing decision.
+        """
+        if candidate.confidence >= self.high_confidence_threshold:
+            return ConfidenceWall.AUTO_MATCH
+        elif candidate.confidence >= self.medium_confidence_threshold:
+            return ConfidenceWall.HUMAN_REVIEW
+        else:
+            return ConfidenceWall.EXCEPTION
+
+    def detect_exception_reason(
+        self, candidate: EntityCandidate, all_candidates: List[EntityCandidate]
+    ) -> Optional[ExceptionReason]:
+        """Classify why a candidate is an exception.
+
+        Args:
+            candidate: The routed candidate.
+            all_candidates: All candidates considered (for ambiguity detection).
+
+        Returns:
+            ExceptionReason enum, or None if not an exception.
+        """
+        wall = self.route_by_confidence_wall(candidate)
+        if wall != ConfidenceWall.EXCEPTION:
+            return None
+
+        # Determine specific reason
+        if candidate.confidence < 0.40:
+            return ExceptionReason.LOW_CONFIDENCE
+        if candidate.scoring_factors.name_similarity < 0.50:
+            return ExceptionReason.WEAK_NAME_MATCH
+        if len(all_candidates) > 2:
+            top_scores = sorted(
+                [c.confidence for c in all_candidates[:3]], reverse=True
+            )
+            if len(top_scores) > 1 and abs(top_scores[0] - top_scores[1]) < 0.10:
+                return ExceptionReason.AMBIGUOUS_CANDIDATES
+        if (
+            abs(candidate.scoring_factors.name_similarity - candidate.scoring_factors.amount_match)
+            > 0.40
+        ):
+            return ExceptionReason.CONFLICTING_SIGNALS
+
+        return ExceptionReason.MISSING_CONTEXT
+
+    def detect_ambiguity(self, candidates: List[EntityCandidate]) -> bool:
+        """Check if match result is ambiguous (multiple strong candidates).
+
+        Args:
+            candidates: Ranked list of candidates.
+
+        Returns:
+            True if ambiguity detected (multiple candidates within 5% confidence).
+        """
+        if len(candidates) < 2:
+            return False
+
+        top = candidates[0].confidence
+        second = candidates[1].confidence
+
+        return abs(top - second) < 0.05
+
     def propose_decision(
         self, candidates: List[EntityCandidate]
     ) -> Optional[EntityCandidate]:
-        """Select top candidate as the proposal (if any).
+        """Select top candidate with confidence wall routing.
 
         Returns:
-            Top candidate, or None if no candidates.
+            Top candidate with routing decision, or None if no candidates.
         """
         if not candidates:
             return None
 
         top = candidates[0]
 
-        # Only auto-propose if confidence is high enough AND name match is strong
-        if top.confidence >= 0.75 and top.scoring_factors.name_similarity >= 0.70:
+        # Route by confidence wall (Wave 5)
+        wall = self.route_by_confidence_wall(top)
+        top.confidence_wall = wall
+        exception_reason = self.detect_exception_reason(top, candidates)
+        top.exception_reason = exception_reason
+
+        # Set requires_human_review based on wall
+        if wall == ConfidenceWall.AUTO_MATCH:
             top.requires_human_review = False
-        else:
+        elif wall == ConfidenceWall.HUMAN_REVIEW:
+            top.requires_human_review = True
+        else:  # EXCEPTION
             top.requires_human_review = True
 
         return top
