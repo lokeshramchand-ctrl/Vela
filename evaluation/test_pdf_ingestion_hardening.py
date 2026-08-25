@@ -26,6 +26,7 @@ since that's the one code shape that would reintroduce the false-success
 gap this phase confirms does not currently exist.
 """
 
+import os
 import re
 import unittest
 from pathlib import Path
@@ -52,14 +53,25 @@ def _extract_function_source(full_source: str, function_name: str) -> str:
     return full_source[start_match.start():end]
 
 
+_MALFORMED_XREF_STATEMENT_PATH = "mock/gpay_statement_20260101_20260630.pdf"
+# Real personal Google Pay statement, not a synthetic fixture, despite the
+# "mock/" directory name (Phase 15 finding) - gitignored/untracked as of
+# this branch. Skips gracefully when absent, e.g. in a fresh CI checkout.
+_skip_unless_malformed_xref_statement_present = unittest.skipUnless(
+    os.path.exists(_MALFORMED_XREF_STATEMENT_PATH),
+    f"{_MALFORMED_XREF_STATEMENT_PATH} is gitignored/untracked and not present in this checkout",
+)
+
+
 class TestUploadPathHasNoFalseSuccessGap(unittest.TestCase):
+    @_skip_unless_malformed_xref_statement_present
     def test_malformed_xref_fixture_fails_before_any_persistence_step_would_run(self):
         """Replays routers/statements.py's exact synchronous sequence against
         the known-bad fixture (EDGE_CASE_REPORT.md finding 7): open_and_inspect
         succeeds, extract_text is the step that actually fails - and it fails
         before validate_signature/parse_period/parse_declared_totals, which
         are themselves all still upstream of any persistence call."""
-        with open("mock/gpay_statement_20260101_20260630.pdf", "rb") as f:
+        with open(_MALFORMED_XREF_STATEMENT_PATH, "rb") as f:
             raw = f.read()
 
         page_count, _ = statement_parser.open_and_inspect(raw)

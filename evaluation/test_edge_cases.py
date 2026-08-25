@@ -30,15 +30,22 @@ from statements.pdf_parser import (
 
 BASE_DATE = datetime(2026, 3, 1)
 
-# assets/gpay_statement_20260201_20260731.pdf is a real personal Google Pay
-# statement (Phase 7/15 finding), not a synthetic fixture - it's gitignored
-# and untracked as of this branch, kept on disk locally only. Tests that use
-# it skip gracefully rather than fail when it isn't present, e.g. in a fresh
-# CI checkout.
+# assets/gpay_statement_20260201_20260731.pdf and
+# mock/gpay_statement_20260101_20260630.pdf are both real personal Google
+# Pay statements (Phase 7/15 finding - despite the "mock/" directory name,
+# neither is synthetic), not test fixtures - both are gitignored and
+# untracked as of this branch, kept on disk locally only. Tests that use
+# either one skip gracefully rather than fail when it isn't present, e.g.
+# in a fresh CI checkout.
 _REAL_STATEMENT_PATH = "assets/gpay_statement_20260201_20260731.pdf"
+_MALFORMED_XREF_STATEMENT_PATH = "mock/gpay_statement_20260101_20260630.pdf"
 _skip_unless_real_statement_present = unittest.skipUnless(
     os.path.exists(_REAL_STATEMENT_PATH),
     f"{_REAL_STATEMENT_PATH} is gitignored/untracked and not present in this checkout",
+)
+_skip_unless_malformed_xref_statement_present = unittest.skipUnless(
+    os.path.exists(_MALFORMED_XREF_STATEMENT_PATH),
+    f"{_MALFORMED_XREF_STATEMENT_PATH} is gitignored/untracked and not present in this checkout",
 )
 
 
@@ -364,6 +371,7 @@ class PDFIngestionEdgeCases(unittest.TestCase):
         with self.assertRaises(CorruptedPDFError):
             statement_parser.open_and_inspect(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3")
 
+    @_skip_unless_malformed_xref_statement_present
     def test_real_pdf_that_passes_header_check_but_fails_text_extraction(self):
         """FINDING: mock/gpay_statement_20260101_20260630.pdf is a real,
         non-empty PDF (267KB, valid %PDF-1.5 header) whose xref table pypdf
@@ -376,7 +384,7 @@ class PDFIngestionEdgeCases(unittest.TestCase):
         step later - the error surfaces as a second, separate
         CorruptedPDFError from extract_text() rather than being caught
         up front."""
-        with open("mock/gpay_statement_20260101_20260630.pdf", "rb") as f:
+        with open(_MALFORMED_XREF_STATEMENT_PATH, "rb") as f:
             raw = f.read()
         page_count, _ = statement_parser.open_and_inspect(raw)
         self.assertGreater(page_count, 0)
