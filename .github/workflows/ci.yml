@@ -130,6 +130,8 @@ jobs:
         run: pytest evaluation/test_performance.py -v
       - name: Run Track 04 end-to-end qualification test
         run: pytest evaluation/test_track04_end_to_end.py -v
+      - name: Run the full Track 04 suite via the one-command target (Phase 18)
+        run: make test-track04
 
   # --- Frontend (Flutter) ---
   frontend:
