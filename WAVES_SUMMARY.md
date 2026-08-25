@@ -12,8 +12,8 @@ A progressive series of features that build from raw transaction data to a compl
 | Wave 4 | AI-assisted entity resolution | ✅ Complete | merged |
 | Wave 5 | Confidence routing + exception management | ✅ Complete | merged |
 | Wave 6 | Finance Controller UI | 🚀 Ready | pending |
-| Wave 7 | Feedback loop + confidence calibration | 📋 Planned | - |
-| Wave 8 | Batch operations + audit | 📋 Planned | - |
+| Wave 7 | Cash-position reconciliation | ✅ Complete | merged |
+| Wave 8 | Evaluation: ground-truth precision/recall/false-match-cost harness | ✅ Complete | pending |
 
 ## Detailed Breakdown
 
@@ -122,30 +122,42 @@ A progressive series of features that build from raw transaction data to a compl
 
 ---
 
-### Wave 7: Feedback Loop (Calibration)
+### Wave 7: Cash-Position Reconciliation
 
-**What** (Planned): Use operator decisions from Wave 6 to improve Wave 5's confidence walls.
+**What**: Answers "why don't my books balance?" Compares opening balance + verified inflows − verified outflows
+(expected) against the reported closing balance, surfacing the variance and which open exceptions likely explain it.
 
-**Concept**:
-- When operator approves exception with 72% confidence → note that 72% is actually reliable
-- When operator rejects exception with 80% confidence → note that 80% is not reliable enough
-- Retrain Wave 5 thresholds based on this feedback
+**Files**: `routers/controller.py` (`GET /controller/cash-position`), `frontend/lib/features/controller/`
 
-**Why**: Confidence walls should drift based on real-world data. Wave 7 makes the system self-improving.
+**Why**: Match-rate stats tell you *how much* is unresolved; cash position tells you *whether it matters* — a variance
+of ₹0 means the open exceptions net out to nothing, a large variance means real money is unaccounted for.
+
+Feedback-loop/confidence-calibration work (originally planned as Wave 7) remains a future wave — see
+[Next: Planning](#next-planning-wave-9) below.
 
 ---
 
-### Wave 8: Batch Operations (Scaling)
+### Wave 8: Evaluation (Ground Truth)
 
-**What** (Planned): Handle high-volume reconciliation.
+**What**: A synthetic, ground-truth-labeled dataset (250 source-A / 250 source-B records: 221 true matches, 21 known
+exceptions, 8 intentionally ambiguous — the same 221/21/8 split Wave 6's controller mock stats used) run blind
+through the real Wave 4/5 matcher, then scored against the withheld ground truth on precision, recall, exception
+rate, throughput, and false-match cost.
 
-**Features**:
-- Bulk resolve similar exceptions (same merchant, same issue type)
-- Operator batching workflows
-- CSV import/export for external reconciliation
-- Audit trail for compliance
+**Key result**: Zero false auto-matches across all 29 non-match/ambiguous traps, at any random seed. Vela's
+confidence wall costs ~83% less (by a false-match-cost model where an unsafe auto-match is weighted 50x an
+exception) than a naive matcher that always commits to its top-scored candidate — the quantified version of
+"never force a match."
 
-**Why**: Individual exception-by-exception review doesn't scale to thousands of daily transactions.
+**Bonus finding**: the evaluation surfaced two real defects in `ai_resolution/matcher.py`'s `ScoringFactors.aggregate()`
+and `NameSimilarityMatcher.score()` that make the 0.90 AUTO_MATCH tier mathematically unreachable as currently coded
+(max possible confidence is 0.8425). See `docs/WAVE8.md` for the full analysis and recommended fix.
+
+**Files**: `evaluation/dataset.py`, `evaluation/harness.py`, `evaluation/test_evaluation.py`, `evaluation/run_evaluation.py`
+
+**Why**: "Evaluation is not optional." Every prior wave shipped confidence scores and routing decisions without ever
+measuring, against known ground truth, whether those decisions were actually correct. Wave 8 closes that gap and
+turns "we route conservatively" from a design claim into a measured, regression-tested guarantee.
 
 ---
 
@@ -232,14 +244,16 @@ Wave 7 (future): Logs "72% confidence + operator approval" for retraining
 | 4 | High-confidence matches | >90% |
 | 5 | Match rate (high+medium) | >88% |
 | 6 | Exception resolution time | <5 min |
-| 7 | Feedback-driven improvement | +2% match rate/quarter |
-| 8 | Bulk resolution efficiency | >1000 tx/operator/day |
+| 7 | Cash-position variance visibility | 100% of exceptions attributable |
+| 8 | False-match rate on known traps | 0% (measured, not assumed) |
 
 ---
 
-## Next: Planning Wave 7
+## Next: Planning Wave 9
 
-After Wave 6 is live, Wave 7 will focus on:
+Wave 8's evaluation harness measured the matcher, it didn't change it — the confidence-ceiling finding in
+`docs/WAVE8.md` (AUTO_MATCH is currently unreachable) is the natural next fix, and the feedback-loop /
+confidence-calibration work originally scoped for Wave 7 is still undone. Wave 9 should focus on:
 
 1. **Feedback Loop Infrastructure**
    - Log every operator decision (approve/reject) with metadata
@@ -269,15 +283,15 @@ Wave 3: "Here's what we notice" (Patterns)
 Wave 4: "Here's our best match" (Resolution)
 Wave 5: "Here's our confidence" (Routing)
 Wave 6: "Here's for you to review" (Operations)
-Wave 7: "Here's what we learned" (Feedback)
-Wave 8: "Here's how to scale" (Batch)
+Wave 7: "Here's whether it balances" (Cash Position)
+Wave 8: "Here's the proof" (Evaluation)
 ```
 
 Together, they form a complete **finance operations platform** that ingests, classifies, reconciles, and improves continuously.
 
 ---
 
-**Current Branch**: `wave6`  
-**Next Milestone**: Merge Wave 6, plan Wave 7 feedback infrastructure  
-**For Details**: See WAVE6_QUICKSTART.md, docs/WAVE6.md, and individual wave documentation  
+**Current Branch**: `wave8`  
+**Next Milestone**: Merge Wave 8, fix the AUTO_MATCH confidence-ceiling bug it surfaced, plan Wave 9
+**For Details**: See WAVE6_QUICKSTART.md, docs/WAVE6.md, docs/WAVE8.md, and individual wave documentation  
 

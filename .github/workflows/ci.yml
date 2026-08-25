@@ -98,6 +98,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run test suite
         run: pytest test_api.py -v
+      - name: Run matching-engine evaluation (Wave 8)
+        run: pytest evaluation/test_evaluation.py -v
 
   # --- Frontend (Flutter) ---
   frontend:

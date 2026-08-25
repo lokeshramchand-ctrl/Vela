@@ -41,6 +41,7 @@ extend-immutable-calls = [
 [tool.ruff.lint.per-file-ignores]
 "test_api.py" = ["S101", "S105", "S106", "S107", "S311"]  # asserts, test fixture "keys", and non-crypto random test data
 "scripts/*.py" = ["S105", "S106", "S108", "S311"]  # dev/local-only scripts with known local defaults and non-crypto mock data generation
+"evaluation/dataset.py" = ["S311"]  # deterministic synthetic-data generation, not cryptographic
 
 [tool.pytest.ini_options]
 testpaths = ["."]
