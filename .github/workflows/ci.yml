@@ -120,6 +120,8 @@ jobs:
         run: pytest evaluation/test_mongo_integration.py -v
       - name: Run Track 04 qualification benchmark tests
         run: pytest evaluation/test_track04_benchmark.py -v
+      - name: Run deterministic baseline vs full Vela comparison tests
+        run: pytest evaluation/test_deterministic_baseline.py -v
 
   # --- Frontend (Flutter) ---
   frontend:
