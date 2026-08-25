@@ -44,29 +44,37 @@ class MatchingEngineEdgeCases(unittest.TestCase):
         return self.matcher.score_candidate(**kw)
 
     # 1. Exact match ----------------------------------------------------
-    def test_exact_match_never_reaches_auto_match(self):
-        """FINDING: a byte-identical merchant name, amount, and date - the
-        best possible input the matcher could ever see - still doesn't clear
-        the 0.90 AUTO_MATCH wall. NameSimilarityMatcher.score() only applies
-        its 'levenshtein' weight (0.50) for non-abbreviation names; the
-        'exact_alias' weight (0.20) it defines is never consulted. An exact
-        text match on "Amazon"/"Amazon" therefore scores name_similarity=0.50,
-        not 1.0, capping overall confidence at ~0.77 and routing to
-        HUMAN_REVIEW even though every signal agrees."""
+    def test_exact_match_now_reaches_auto_match(self):
+        """FIXED (was FINDING): a byte-identical merchant name, amount, and
+        date - the best possible input the matcher could ever see - now
+        clears the 0.90 AUTO_MATCH wall. Two bugs compounded to block this
+        before: (1) NameSimilarityMatcher.score() declared an 'exact_alias'
+        weight (0.20) but never applied it, so an exact text match on
+        "Amazon"/"Amazon" only got Levenshtein's 0.50 weight; (2)
+        ScoringFactors.aggregate() looked up a nonexistent 'trust_state'
+        attribute (stripping the "_factor" suffix) instead of
+        'trust_state_factor', silently dropping that weight's entire 0.10
+        contribution from every aggregate. Both are fixed together, since
+        fixing only the first still capped the best case at ~0.89, just
+        under the wall."""
         c = self.score(
             query_text="Amazon", query_amount=999.0, query_date=BASE_DATE,
             candidate_merchant="Amazon", candidate_amount=999.0, candidate_date=BASE_DATE,
             historical_encounters=25, trust_state="PERMANENT",
         )
-        self.assertAlmostEqual(c.scoring_factors.name_similarity, 0.5, places=2)
-        self.assertEqual(self.matcher.route_by_confidence_wall(c), ConfidenceWall.HUMAN_REVIEW)
+        self.assertAlmostEqual(c.scoring_factors.name_similarity, 0.7, places=2)
+        self.assertEqual(self.matcher.route_by_confidence_wall(c), ConfidenceWall.AUTO_MATCH)
 
     # 2. Merchant variation ----------------------------------------------
-    def test_known_abbreviation_scores_higher_than_plain_exact_match(self):
-        """A listed abbreviation ("AMZN" -> "Amazon") gets a name_similarity
-        bonus (0.80) that a literal exact match of the full name doesn't
-        (0.50, see above) - abbreviation coverage is a hardcoded stub dict,
-        so this only helps merchants already in that table."""
+    def test_known_abbreviation_scores_at_least_as_well_as_plain_exact_match(self):
+        """FIXED: with exact_alias now applied, a byte-identical name
+        ("Amazon" vs "Amazon", name_similarity=0.7: 0.5 Levenshtein + 0.2
+        exact) is no longer weaker than a listed abbreviation ("AMZN" ->
+        "Amazon", name_similarity=0.7: partial Levenshtein + 0.3 abbreviation
+        bonus) - previously the abbreviation stub table scored strictly
+        higher than a literal exact match, which was backwards. They now tie
+        in this case; abbreviation coverage is still a hardcoded stub dict,
+        so it only helps merchants already listed in it."""
         abbrev = self.score(
             query_text="AMZN", query_amount=500.0, query_date=BASE_DATE,
             candidate_merchant="Amazon", candidate_amount=500.0, candidate_date=BASE_DATE,
@@ -75,7 +83,7 @@ class MatchingEngineEdgeCases(unittest.TestCase):
             query_text="Amazon", query_amount=500.0, query_date=BASE_DATE,
             candidate_merchant="Amazon", candidate_amount=500.0, candidate_date=BASE_DATE,
         )
-        self.assertGreater(abbrev.scoring_factors.name_similarity, exact.scoring_factors.name_similarity)
+        self.assertGreaterEqual(abbrev.scoring_factors.name_similarity, exact.scoring_factors.name_similarity)
 
     def test_unlisted_surface_form_variation_scores_moderately(self):
         """"AMAZON PAY" vs "Amazon" isn't a listed abbreviation, so it falls
@@ -189,30 +197,44 @@ class MatchingEngineEdgeCases(unittest.TestCase):
     def test_same_amount_different_merchant_does_not_auto_match(self):
         """A coincidental amount match (Rs 500 Swiggy vs Rs 500 Amazon, same
         day) must not be trusted on amount+date alone - weak name similarity
-        correctly routes to EXCEPTION rather than a false match."""
+        correctly keeps this out of AUTO_MATCH. NOTE: after the Phase 2
+        trust_state_factor fix, this now lands in HUMAN_REVIEW rather than
+        EXCEPTION (0% name similarity is still outweighed by amount+date+
+        historical-trust agreement) - still safe (never auto-matched, a
+        human sees a 0% name-similarity pairing and rejects it), just a
+        different, still-non-automated bucket than before the fix."""
         c = self.score(
             query_text="Swiggy", query_amount=500.0, query_date=BASE_DATE,
             candidate_merchant="Amazon", candidate_amount=500.0, candidate_date=BASE_DATE,
         )
         self.assertEqual(c.scoring_factors.name_similarity, 0.0)
-        self.assertEqual(self.matcher.route_by_confidence_wall(c), ConfidenceWall.EXCEPTION)
+        wall = self.matcher.route_by_confidence_wall(c)
+        self.assertIn(wall, (ConfidenceWall.HUMAN_REVIEW, ConfidenceWall.EXCEPTION))
+        self.assertNotEqual(wall, ConfidenceWall.AUTO_MATCH)
 
     # 11. Recurring payment ------------------------------------------------------
     def test_recurring_monthly_payment_loses_all_temporal_credit(self):
-        """FINDING: a legitimate monthly subscription (same merchant, same
-        amount, ~30 days apart) is exactly the kind of match a real user would
-        expect to auto-reconcile - but TemporalProximityMatcher's max_days=3
-        gives it zero temporal credit, identical to a transaction 7 days or
-        7 months away. There's no periodicity-aware exception for recurring
-        billing, even though features/periodicity.py exists elsewhere in this
-        codebase for exactly this signal - it isn't wired into the matcher."""
+        """FINDING (still open - Phase 4 territory): a legitimate monthly
+        subscription (same merchant, same amount, ~30 days apart) is exactly
+        the kind of match a real user would expect to auto-reconcile - but
+        TemporalProximityMatcher's max_days=3 gives it zero temporal credit,
+        identical to a transaction 7 days or 7 months away. There's no
+        periodicity-aware exception for recurring billing, even though
+        features/periodicity.py exists elsewhere in this codebase for
+        exactly this signal - it isn't wired into the matcher. NOTE: after
+        the Phase 2 trust_state_factor fix, this now lands in HUMAN_REVIEW
+        (was EXCEPTION) since the other signals are strong enough to clear
+        0.65 on their own - still correctly held for a human, not
+        auto-matched, but the periodicity gap itself is unchanged."""
         c = self.score(
             query_text="Netflix", query_amount=649.0, query_date=BASE_DATE,
             candidate_merchant="Netflix", candidate_amount=649.0, candidate_date=BASE_DATE + timedelta(days=30),
             historical_encounters=25, trust_state="PERMANENT",
         )
         self.assertEqual(c.scoring_factors.temporal_proximity, 0.0)
-        self.assertEqual(self.matcher.route_by_confidence_wall(c), ConfidenceWall.EXCEPTION)
+        wall = self.matcher.route_by_confidence_wall(c)
+        self.assertIn(wall, (ConfidenceWall.HUMAN_REVIEW, ConfidenceWall.EXCEPTION))
+        self.assertNotEqual(wall, ConfidenceWall.AUTO_MATCH)
 
     # 12. Refund -------------------------------------------------------------------
     def test_refund_with_negated_amount_fails_amount_match_entirely(self):

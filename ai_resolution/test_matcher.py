@@ -36,7 +36,19 @@ class TestNameSimilarityMatcher(unittest.TestCase):
         self.assertGreater(score, 0.95)
 
     def test_partial_match(self):
-        """Partial string matches should score moderately."""
+        """Partial string matches should score moderately.
+
+        KNOWN PRE-EXISTING GAP (not fixed by Phase 2): this asserts >0.70 for
+        a substring match ("AMAZON PAY" contains "AMAZON") that is neither
+        byte-identical (exact_alias) nor in the hardcoded abbreviation stub,
+        so it only ever earns Levenshtein's 0.50 weight (~0.375 here). Unlike
+        exact_alias (a declared-but-unapplied weight - a genuine bug, fixed
+        in Phase 2) and trust_state_factor (a dict-key typo - also fixed),
+        this gap has no missing-but-declared weight to apply: it would need a
+        new substring/fuzzy-credit heuristic that doesn't exist yet anywhere
+        in NameSimilarityMatcher. That's a real ML-quality improvement, but a
+        different, undeclared one - out of scope for the findings this
+        branch investigates (EDGE_CASE_REPORT.md findings 1-4)."""
         score = self.matcher.score("AMAZON PAY", "AMAZON")
         self.assertGreater(score, 0.70)
         self.assertLess(score, 1.0)
@@ -167,7 +179,16 @@ class TestAIEntityMatcher(unittest.TestCase):
         self.base_date = datetime(2024, 8, 11)
 
     def test_score_candidate_high_confidence(self):
-        """Candidate with matching name, amount, and date should score high."""
+        """Candidate with matching name, amount, and date should score high.
+
+        KNOWN PRE-EXISTING GAP (not fixed by Phase 2): "UBER INDIA" vs "Uber"
+        is the same substring-credit gap as test_partial_match above -
+        "UBER INDIA" isn't a literal abbrev_map key and isn't byte-identical
+        to "Uber", so name_similarity is Levenshtein-only (~0.286) and the
+        aggregate lands at ~0.795, just under this test's >0.80 bar. Left
+        failing and documented rather than fixed, since it needs the same
+        out-of-scope substring heuristic, not the exact_alias/trust_state_factor
+        fixes this branch makes."""
         candidate = self.matcher.score_candidate(
             query_text="UBER INDIA",
             query_amount=382.0,
@@ -339,6 +360,73 @@ class TestDirectionAwareMatching(unittest.TestCase):
     def test_direction_check_is_case_insensitive(self):
         candidate = self._score(query_direction="debit", candidate_direction="DEBIT")
         self.assertFalse(candidate.direction_conflict)
+
+
+class TestPhase2ConfidenceSemantics(unittest.TestCase):
+    """Phase 2 regression tests: the four combinations the qualification
+    spec calls out explicitly, now that exact-alias/trust_state_factor are
+    fixed (Phase 2) and direction is a hard pre-filter (Phase 1)."""
+
+    def setUp(self):
+        self.matcher = AIEntityMatcher()
+        self.base_date = datetime(2026, 3, 1)
+
+    def test_case_a_exact_merchant_amount_direction_date_reaches_auto_match(self):
+        """Strong evidence across every signal, with a compatible direction,
+        is eligible for AUTO_MATCH."""
+        c = self.matcher.score_candidate(
+            query_text="Amazon", query_amount=999.0, query_date=self.base_date,
+            candidate_merchant="Amazon", candidate_amount=999.0, candidate_date=self.base_date,
+            historical_encounters=25, trust_state="PERMANENT",
+            query_direction="DEBIT", candidate_direction="DEBIT",
+        )
+        self.assertEqual(self.matcher.route_by_confidence_wall(c), ConfidenceWall.AUTO_MATCH)
+
+    def test_case_b_exact_merchant_amount_mismatch_does_not_auto_match(self):
+        """Strong merchant similarity alone must not override conflicting
+        financial evidence - a large amount discrepancy keeps this out of
+        AUTO_MATCH even with a perfect name and maximal trust."""
+        c = self.matcher.score_candidate(
+            query_text="Amazon", query_amount=5000.0, query_date=self.base_date,
+            candidate_merchant="Amazon", candidate_amount=1000.0, candidate_date=self.base_date,
+            historical_encounters=25, trust_state="PERMANENT",
+            query_direction="DEBIT", candidate_direction="DEBIT",
+        )
+        self.assertEqual(c.scoring_factors.amount_match, 0.0)
+        self.assertNotEqual(self.matcher.route_by_confidence_wall(c), ConfidenceWall.AUTO_MATCH)
+
+    def test_case_c_exact_merchant_incompatible_direction_does_not_auto_match(self):
+        """Even the strongest possible name/amount/date signal must not
+        auto-match across an incompatible direction - the hard pre-filter
+        from Phase 1 holds after the Phase 2 confidence fix."""
+        c = self.matcher.score_candidate(
+            query_text="Amazon", query_amount=999.0, query_date=self.base_date,
+            candidate_merchant="Amazon", candidate_amount=999.0, candidate_date=self.base_date,
+            historical_encounters=25, trust_state="PERMANENT",
+            query_direction="DEBIT", candidate_direction="CREDIT",
+        )
+        self.assertEqual(self.matcher.route_by_confidence_wall(c), ConfidenceWall.EXCEPTION)
+        self.assertEqual(self.matcher.detect_exception_reason(c, [c]), ExceptionReason.DIRECTION_MISMATCH)
+
+    def test_case_d_exact_merchant_duplicate_candidates_is_not_auto_matched(self):
+        """Two byte-identical, maximally-confident candidates must not let
+        propose_decision() pick one arbitrarily - detect_ambiguity() vetoes
+        the auto-match, same veto pattern evaluation/harness.py already
+        applies (harness.py:214-218), now confirmed against a candidate
+        pair that (post-fix) clears AUTO_MATCH on its own."""
+        kwargs = dict(
+            query_text="Amazon", query_amount=999.0, query_date=self.base_date,
+            candidate_merchant="Amazon", candidate_amount=999.0, candidate_date=self.base_date,
+            historical_encounters=25, trust_state="PERMANENT",
+            query_direction="DEBIT", candidate_direction="DEBIT",
+        )
+        c1 = self.matcher.score_candidate(**kwargs)
+        c2 = self.matcher.score_candidate(**kwargs)
+        ranked = self.matcher.rank_candidates([c1, c2])
+        # Confirms the underlying candidates really would clear the wall in
+        # isolation - the interesting assertion is the ambiguity veto below.
+        self.assertEqual(self.matcher.route_by_confidence_wall(ranked[0]), ConfidenceWall.AUTO_MATCH)
+        self.assertTrue(self.matcher.detect_ambiguity(ranked))
 
 
 class TestConfidenceWalls(unittest.TestCase):
