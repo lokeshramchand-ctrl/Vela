@@ -216,13 +216,13 @@ class MatchingEngineEdgeCases(unittest.TestCase):
 
     # 12. Refund -------------------------------------------------------------------
     def test_refund_with_negated_amount_fails_amount_match_entirely(self):
-        """FINDING: a refund modeled as a negative amount against a positive
-        original (-500 vs 500) isn't recognized as "the inverse of this
-        transaction" - AmountMatcher does a direct numeric comparison with no
-        sign-awareness, so it just looks like a completely wrong amount and
-        scores 0. The matcher has no concept of a refund/reversal
-        relationship at all; that logic (if it exists) lives outside this
-        class."""
+        """AmountMatcher still does a direct numeric comparison with no
+        sign-awareness on its own (-500 vs 500 scores 0 there, unchanged),
+        but a refund is now also caught structurally: when the caller
+        supplies direction (CREDIT for the refund vs. DEBIT for the original
+        purchase it reverses), route_by_confidence_wall forces EXCEPTION
+        regardless of any other score - see test 13/14 below for the
+        direction-aware fix itself."""
         c = self.score(
             query_text="Amazon", query_amount=-500.0, query_date=BASE_DATE,
             candidate_merchant="Amazon", candidate_amount=500.0, candidate_date=BASE_DATE,
@@ -230,36 +230,55 @@ class MatchingEngineEdgeCases(unittest.TestCase):
         self.assertEqual(c.scoring_factors.amount_match, 0.0)
 
     # 13. Reversal -------------------------------------------------------------------
-    def test_reversal_same_signed_amount_looks_identical_to_original(self):
-        """FINDING (unsafe direction): if a reversal is instead recorded with
+    def test_reversal_same_signed_amount_is_now_caught_by_direction(self):
+        """FIXED (was FINDING - unsafe direction): a reversal recorded with
         the *same* sign/magnitude as the original debit (a same-day,
         same-merchant, same-amount txn - which is exactly what a same-day
-        reversal often looks like on a statement), the matcher scores it
-        indistinguishably from the original transaction itself, because
-        score_candidate() has no `direction`/`type` parameter at all. Two
-        transactions that are opposites in the ledger can score as a near
-        match to each other purely on name+amount+date."""
+        reversal often looks like on a statement) used to score identically
+        to matching the transaction against itself, because score_candidate()
+        had no direction parameter at all. score_candidate() now accepts
+        query_direction/candidate_direction, and route_by_confidence_wall()
+        treats a known direction disagreement as a hard pre-filter: even
+        though the two candidates below have identical confidence (name/
+        amount/date are unchanged), only the direction-conflicting one is
+        forced to EXCEPTION."""
         original = self.score(
             query_text="Amazon", query_amount=500.0, query_date=BASE_DATE,
             candidate_merchant="Amazon", candidate_amount=500.0, candidate_date=BASE_DATE,
+            query_direction="DEBIT", candidate_direction="DEBIT",
         )
         reversal = self.score(
             query_text="Amazon", query_amount=500.0, query_date=BASE_DATE,
             candidate_merchant="Amazon", candidate_amount=500.0, candidate_date=BASE_DATE,
+            query_direction="CREDIT", candidate_direction="DEBIT",
         )
         self.assertEqual(original.confidence, reversal.confidence)
+        self.assertFalse(original.direction_conflict)
+        self.assertTrue(reversal.direction_conflict)
+        self.assertNotEqual(
+            self.matcher.route_by_confidence_wall(reversal), ConfidenceWall.AUTO_MATCH,
+        )
+        self.assertEqual(self.matcher.route_by_confidence_wall(reversal), ConfidenceWall.EXCEPTION)
 
     # 14. Debit vs credit --------------------------------------------------------------
-    def test_score_candidate_has_no_direction_parameter(self):
-        """FINDING: confirms the structural gap behind cases 12/13 - there is
-        no debit/credit or direction field anywhere in score_candidate()'s
-        signature. Direction should arguably be a hard pre-filter (a debit
-        can never match a credit) rather than left to the fuzzy confidence
-        score, where it currently isn't considered at all."""
+    def test_score_candidate_now_has_direction_parameters_and_enforces_them(self):
+        """FIXED (was FINDING): score_candidate() now takes query_direction
+        and candidate_direction. This isn't a fuzzy score input - it's
+        consulted as a hard pre-filter in route_by_confidence_wall(), so a
+        debit can never be routed to AUTO_MATCH against a credit no matter
+        how strong name/amount/date are."""
         import inspect
         params = inspect.signature(self.matcher.score_candidate).parameters
-        direction_params = {"direction", "type", "txn_type", "is_credit", "is_debit"}
-        self.assertFalse(direction_params & params.keys())
+        self.assertIn("query_direction", params)
+        self.assertIn("candidate_direction", params)
+
+        c = self.score(
+            query_text="Amazon", query_amount=999.0, query_date=BASE_DATE,
+            candidate_merchant="Amazon", candidate_amount=999.0, candidate_date=BASE_DATE,
+            historical_encounters=25, trust_state="PERMANENT",
+            query_direction="DEBIT", candidate_direction="CREDIT",
+        )
+        self.assertEqual(self.matcher.route_by_confidence_wall(c), ConfidenceWall.EXCEPTION)
 
     # 15. Partial data -----------------------------------------------------------------
     def test_missing_amount_falls_back_to_neutral_score(self):

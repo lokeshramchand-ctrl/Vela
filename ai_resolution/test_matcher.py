@@ -267,6 +267,80 @@ class TestAIEntityMatcher(unittest.TestCase):
         self.assertIsNone(decision)
 
 
+class TestDirectionAwareMatching(unittest.TestCase):
+    """Phase 1 regression tests: a debit must never auto-match a credit.
+
+    Direction is a hard pre-filter enforced in route_by_confidence_wall(),
+    not a fuzzy score penalty - so these tests check the routing decision
+    and exception_reason, not just the raw confidence number.
+    """
+
+    def setUp(self):
+        self.matcher = AIEntityMatcher()
+        self.base_date = datetime(2024, 8, 11)
+
+    def _score(self, query_direction=None, candidate_direction=None, **overrides):
+        kwargs = dict(
+            query_text="Amazon", query_amount=500.0, query_date=self.base_date,
+            candidate_merchant="Amazon", candidate_amount=500.0, candidate_date=self.base_date,
+            historical_encounters=25, trust_state="PERMANENT",
+            query_direction=query_direction, candidate_direction=candidate_direction,
+        )
+        kwargs.update(overrides)
+        return self.matcher.score_candidate(**kwargs)
+
+    def test_debit_does_not_match_credit_even_with_perfect_signals(self):
+        """Best possible name/amount/date signal, but query is a debit and
+        the candidate is a credit - must be forced to EXCEPTION regardless
+        of how high the raw confidence score is."""
+        candidate = self._score(query_direction="DEBIT", candidate_direction="CREDIT")
+        self.assertTrue(candidate.direction_conflict)
+        self.assertEqual(self.matcher.route_by_confidence_wall(candidate), ConfidenceWall.EXCEPTION)
+
+    def test_normal_payment_does_not_match_refund(self):
+        """A refund (CREDIT) must not be treated as a match for the original
+        debit purchase it's refunding, even with identical merchant/amount/date."""
+        candidate = self._score(query_direction="DEBIT", candidate_direction="CREDIT")
+        reason = self.matcher.detect_exception_reason(candidate, [candidate])
+        self.assertEqual(reason, ExceptionReason.DIRECTION_MISMATCH)
+
+    def test_normal_payment_does_not_match_reversal(self):
+        """A same-day, same-amount reversal recorded with the same sign as
+        the original (the realistic statement pattern from EDGE_CASE_REPORT
+        finding 4) is only distinguishable by its direction column - this
+        must still be caught even though amount/date/name all agree."""
+        candidate = self._score(query_direction="CREDIT", candidate_direction="DEBIT")
+        self.assertEqual(self.matcher.route_by_confidence_wall(candidate), ConfidenceWall.EXCEPTION)
+
+    def test_reversal_does_not_match_original_payment(self):
+        """Symmetric to the above: from the reversal's point of view, the
+        original debit it's reversing must also be rejected as a match."""
+        candidate = self._score(query_direction="DEBIT", candidate_direction="CREDIT")
+        self.assertEqual(self.matcher.route_by_confidence_wall(candidate), ConfidenceWall.EXCEPTION)
+
+    def test_compatible_same_direction_transactions_can_still_reconcile(self):
+        """Two debits (the normal case: the same purchase reported on two
+        ledgers) must not be penalized just because direction is now checked -
+        direction_conflict must be False and the wall must be decided purely
+        by confidence, same as before this change."""
+        candidate = self._score(query_direction="DEBIT", candidate_direction="DEBIT")
+        self.assertFalse(candidate.direction_conflict)
+
+    def test_unknown_direction_is_not_treated_as_a_conflict(self):
+        """Missing direction data (None on either side) must not be conflated
+        with a *known* conflict - that would make every legacy record
+        lacking direction metadata unmatchable. Missing data is already
+        handled conservatively by the existing confidence math."""
+        candidate = self._score(query_direction=None, candidate_direction="DEBIT")
+        self.assertFalse(candidate.direction_conflict)
+        candidate2 = self._score(query_direction=None, candidate_direction=None)
+        self.assertFalse(candidate2.direction_conflict)
+
+    def test_direction_check_is_case_insensitive(self):
+        candidate = self._score(query_direction="debit", candidate_direction="DEBIT")
+        self.assertFalse(candidate.direction_conflict)
+
+
 class TestConfidenceWalls(unittest.TestCase):
     """Test Wave 5 confidence wall routing."""
 

@@ -46,6 +46,7 @@ class ExceptionReason(str, Enum):
     AMBIGUOUS_CANDIDATES = "ambiguous_candidates"
     CONFLICTING_SIGNALS = "conflicting_signals"
     MISSING_CONTEXT = "missing_context"
+    DIRECTION_MISMATCH = "direction_mismatch"
 
 
 @dataclass
@@ -93,6 +94,7 @@ class EntityCandidate:
     requires_human_review: bool = False
     confidence_wall: Optional[ConfidenceWall] = None
     exception_reason: Optional[ExceptionReason] = None
+    direction_conflict: bool = False
 
     def to_dict(self) -> dict:
         """Serialize to JSON-compatible dict."""
@@ -110,6 +112,7 @@ class EntityCandidate:
             "requires_human_review": self.requires_human_review,
             "confidence_wall": self.confidence_wall,
             "exception_reason": self.exception_reason,
+            "direction_conflict": self.direction_conflict,
         }
 
 
@@ -282,6 +285,22 @@ class TemporalProximityMatcher:
         return 0.0
 
 
+def _directions_conflict(query_direction: Optional[str], candidate_direction: Optional[str]) -> bool:
+    """True only when both directions are known and disagree.
+
+    Unknown direction (None on either side) is not a conflict - it's missing
+    data, and the existing confidence math already handles missing data
+    conservatively. A conflict is only ever raised when we *know* one side
+    is money out and the other is money in, e.g. a debit being proposed as
+    a match for a credit (a refund/reversal pair), which must never be
+    treated as "the same transaction" no matter how well name/amount/date
+    line up.
+    """
+    if query_direction is None or candidate_direction is None:
+        return False
+    return query_direction.strip().upper() != candidate_direction.strip().upper()
+
+
 class AIEntityMatcher:
     """
     Main orchestrator for AI-assisted entity resolution with confidence walls.
@@ -320,6 +339,8 @@ class AIEntityMatcher:
         candidate_date: Optional[datetime] = None,
         historical_encounters: int = 0,
         trust_state: Optional[str] = None,
+        query_direction: Optional[str] = None,
+        candidate_direction: Optional[str] = None,
     ) -> EntityCandidate:
         """Score a single candidate merchant.
 
@@ -332,9 +353,16 @@ class AIEntityMatcher:
             candidate_date: Date of candidate txn (if known).
             historical_encounters: How many times user has seen this merchant.
             trust_state: Phase 4 trust state (EPHEMERAL, TEMPORARY, PERMANENT).
+            query_direction: Direction of the query txn, e.g. "DEBIT"/"CREDIT"
+                (matches models.schemas.TransactionType values). None if unknown.
+            candidate_direction: Direction of the candidate txn. None if unknown.
 
         Returns:
-            EntityCandidate with scored factors.
+            EntityCandidate with scored factors. If both directions are known
+            and disagree, `direction_conflict` is set - this is a hard
+            pre-filter enforced by `route_by_confidence_wall`, not a fuzzy
+            score penalty, so a debit can never auto-match a credit no
+            matter how strong the other signals are.
         """
         factors = ScoringFactors()
 
@@ -378,6 +406,7 @@ class AIEntityMatcher:
             confidence=confidence,
             scoring_factors=factors,
             requires_human_review=requires_review,
+            direction_conflict=_directions_conflict(query_direction, candidate_direction),
         )
 
     def rank_candidates(
@@ -401,6 +430,14 @@ class AIEntityMatcher:
         Returns:
             ConfidenceWall enum indicating routing decision.
         """
+        # Hard pre-filter: a known direction conflict (debit vs. credit)
+        # overrides the confidence score entirely. This must never be
+        # AUTO_MATCH or even HUMAN_REVIEW-by-default-confidence - it's routed
+        # straight to EXCEPTION regardless of how strong name/amount/date
+        # look, since those signals are exactly what make refund/reversal
+        # pairs look deceptively like a match.
+        if candidate.direction_conflict:
+            return ConfidenceWall.EXCEPTION
         if candidate.confidence >= self.high_confidence_threshold:
             return ConfidenceWall.AUTO_MATCH
         elif candidate.confidence >= self.medium_confidence_threshold:
@@ -423,6 +460,9 @@ class AIEntityMatcher:
         wall = self.route_by_confidence_wall(candidate)
         if wall != ConfidenceWall.EXCEPTION:
             return None
+
+        if candidate.direction_conflict:
+            return ExceptionReason.DIRECTION_MISMATCH
 
         # Determine specific reason
         if candidate.confidence < 0.40:
