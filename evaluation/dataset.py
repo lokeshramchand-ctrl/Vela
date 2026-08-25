@@ -524,3 +524,55 @@ def generate_track04_benchmark(seed: int = DEFAULT_SEED) -> EvaluationDataset:
     ground truth (GroundTruthCase.true_b_id) is never passed to the matcher -
     evaluation/harness.py only ever receives LedgerRecord fields."""
     return generate_dataset(seed=seed, extra_categories=True)
+
+
+def generate_scaled_dataset(n: int, seed: int = DEFAULT_SEED) -> EvaluationDataset:
+    """Phase 16: a dataset sized to exactly `n` Source A / `n` Source B
+    records, for throughput/latency measurement at 50/100/250/500+ scale -
+    not for category-coverage correctness testing (that's
+    generate_track04_benchmark()'s job, at a fixed 300).
+
+    Every A record is a TRUE_MATCH case: a real B partner plus 2 distractors
+    as candidates (the same "give it real competition" shape Wave 8 uses),
+    same amount/date noise distribution as generate_dataset()'s clean/noisy
+    split. Deterministic given `seed`.
+    """
+    rng = random.Random(seed)
+    base_date = datetime(2026, 1, 1)
+
+    source_a: list[LedgerRecord] = []
+    source_b: list[LedgerRecord] = []
+    cases: list[GroundTruthCase] = []
+
+    for i in range(n):
+        entity_name, variants = rng.choice(CANONICAL_ENTITIES)
+        a_id, b_id = f"A{i:05d}", f"B{i:05d}"
+        canonical_amount = round(rng.uniform(50, 5000), 2)
+        canonical_date = _random_date(rng, base_date)
+
+        is_clean = rng.random() < 0.55
+        amount_pct, date_skew = (0.0, 0) if is_clean else (0.03, 2)
+        encounters = rng.randint(15, 40) if is_clean else rng.randint(0, 10)
+        trust_state = "PERMANENT" if encounters > 20 else "TEMPORARY" if encounters > 5 else "EPHEMERAL"
+
+        source_a.append(LedgerRecord(
+            id=a_id, source="A", text=rng.choice(variants), canonical_entity=entity_name,
+            amount=canonical_amount, date=canonical_date,
+            historical_encounters=encounters, trust_state=trust_state,
+        ))
+        source_b.append(LedgerRecord(
+            id=b_id, source="B", text=rng.choice(variants), canonical_entity=entity_name,
+            amount=_skew_amount(rng, canonical_amount, pct=amount_pct),
+            date=_skew_date(rng, canonical_date, max_days=date_skew),
+        ))
+        cases.append(GroundTruthCase(a_id=a_id, category=CaseCategory.TRUE_MATCH, true_b_id=b_id, candidate_b_ids=[b_id]))
+
+    all_b_ids = [r.id for r in source_b]
+    for case in cases:
+        distractor_pool = [bid for bid in all_b_ids if bid != case.true_b_id]
+        k = min(2, len(distractor_pool))
+        case.candidate_b_ids.extend(rng.sample(distractor_pool, k))
+
+    rng.shuffle(source_a)
+    rng.shuffle(source_b)
+    return EvaluationDataset(source_a=source_a, source_b=source_b, cases=cases)
