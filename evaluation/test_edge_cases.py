@@ -218,18 +218,21 @@ class MatchingEngineEdgeCases(unittest.TestCase):
 
     # 11. Recurring payment ------------------------------------------------------
     def test_recurring_monthly_payment_loses_all_temporal_credit(self):
-        """FINDING (still open - Phase 4 territory): a legitimate monthly
-        subscription (same merchant, same amount, ~30 days apart) is exactly
-        the kind of match a real user would expect to auto-reconcile - but
-        TemporalProximityMatcher's max_days=3 gives it zero temporal credit,
-        identical to a transaction 7 days or 7 months away. There's no
-        periodicity-aware exception for recurring billing, even though
-        features/periodicity.py exists elsewhere in this codebase for
-        exactly this signal - it isn't wired into the matcher. NOTE: after
-        the Phase 2 trust_state_factor fix, this now lands in HUMAN_REVIEW
-        (was EXCEPTION) since the other signals are strong enough to clear
-        0.65 on their own - still correctly held for a human, not
-        auto-matched, but the periodicity gap itself is unchanged."""
+        """FINDING (still open, deliberately - see docs/PHASE4_PERIODICITY.md):
+        a legitimate monthly subscription (same merchant, same amount, ~30
+        days apart) is exactly the kind of match a real user would expect to
+        auto-reconcile - but TemporalProximityMatcher's max_days=3 gives it
+        zero temporal credit, identical to a transaction 7 days or 7 months
+        away. features/periodicity.py exists for exactly this signal but
+        Phase 4 chose not to wire it into score_candidate() - that method's
+        signature has no way to receive the multi-timestamp history
+        periodicity detection needs, and doing so safely requires an
+        amount-stability check periodicity.py doesn't provide on its own
+        (see the doc for the full reasoning). NOTE: after the Phase 2
+        trust_state_factor fix, this now lands in HUMAN_REVIEW (was
+        EXCEPTION) since the other signals are strong enough to clear 0.65
+        on their own - still correctly held for a human, not auto-matched,
+        but the periodicity gap itself is unchanged."""
         c = self.score(
             query_text="Netflix", query_amount=649.0, query_date=BASE_DATE,
             candidate_merchant="Netflix", candidate_amount=649.0, candidate_date=BASE_DATE + timedelta(days=30),
