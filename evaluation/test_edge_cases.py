@@ -97,26 +97,30 @@ class MatchingEngineEdgeCases(unittest.TestCase):
 
     # 3. Rupee 1 difference -----------------------------------------------
     def test_one_rupee_diff_on_large_amount_gets_tolerance_credit(self):
-        """AmountMatcher's tolerance is percentage-based (5%), not absolute.
-        On a Rs 5000 transaction, a Rs 1 diff is 0.02% - comfortably inside
-        tolerance -> partial credit (0.7)."""
+        """FIXED (Phase 3): a Rs 1 diff is now recognized as absolute
+        rounding/FX noise (within the Rs 2 absolute floor) regardless of the
+        transaction size, so it scores the higher near_exact_weight (0.85)
+        rather than the proportional tolerance_weight (0.7) it used to get
+        purely because 0.02% of Rs 5000 happened to be inside the 5% band."""
         c = self.score(
             query_text="Amazon", query_amount=5000.0, query_date=BASE_DATE,
             candidate_merchant="Amazon", candidate_amount=4999.0, candidate_date=BASE_DATE,
         )
-        self.assertEqual(c.scoring_factors.amount_match, 0.7)
+        self.assertEqual(c.scoring_factors.amount_match, 0.85)
 
     def test_one_rupee_diff_on_small_amount_fails_tolerance(self):
-        """FINDING: the same Rs 1 diff on a Rs 10 transaction is a 10% delta -
-        outside the 5% tolerance band -> scores 0, identical to a completely
-        wrong amount. A percentage-only tolerance is systematically harsher
-        on small transactions (coffee, tips, auto-rickshaw fares) than large
-        ones, for the same absolute rounding/FX noise."""
+        """FIXED (was FINDING): the same Rs 1 diff on a Rs 10 transaction
+        used to be a 10% delta - outside the old 5%-only band - and scored 0,
+        identical to a completely wrong amount. AmountMatcher now has an
+        absolute floor (Rs 2) that applies independently of the percentage
+        band specifically to close this gap: a Rs 1 diff is Rs 1 of noise
+        whether it's on a Rs 10 fare or a Rs 5,000 purchase, and now scores
+        the same near_exact_weight (0.85) either way."""
         c = self.score(
             query_text="Amazon", query_amount=10.0, query_date=BASE_DATE,
             candidate_merchant="Amazon", candidate_amount=9.0, candidate_date=BASE_DATE,
         )
-        self.assertEqual(c.scoring_factors.amount_match, 0.0)
+        self.assertEqual(c.scoring_factors.amount_match, 0.85)
 
     # 4. Rupee 100 difference ----------------------------------------------
     def test_hundred_rupee_diff_within_five_percent_gets_tolerance_credit(self):
