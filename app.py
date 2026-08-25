@@ -23,7 +23,7 @@ from feedback.api_router import router as feedback_router
 from milvus.insert_vectors import vector_store
 
 # Routers
-from routers import analytics, auth, jobs, memory, pipelines, rag, statements, users, v1
+from routers import analytics, auth, controller, jobs, memory, pipelines, rag, statements, users, v1
 from routers.observability import router as observability_router
 
 # Logging
@@ -104,6 +104,7 @@ app.include_router(feedback_router, dependencies=[Depends(validate_api_key)])
 app.include_router(pipelines.router, dependencies=[Depends(validate_api_key)])
 app.include_router(statements.router, dependencies=[Depends(validate_api_key)])
 app.include_router(jobs.router, dependencies=[Depends(validate_api_key)])
+app.include_router(controller.router, dependencies=[Depends(validate_api_key)])
 
 
 # --- Health / Liveness / Readiness ---

@@ -19,6 +19,10 @@ import '../../features/signals/presentation/signals_screen.dart';
 import '../../features/statements/presentation/period_providers.dart';
 import '../../features/upload/presentation/analysing_screen.dart';
 import '../../features/upload/presentation/rejected_screen.dart';
+import '../../features/controller/presentation/controller_screen.dart';
+import '../../features/controller/presentation/exceptions_list_screen.dart';
+import '../../features/controller/presentation/exception_detail_screen.dart';
+import '../../features/controller/domain/exception.dart';
 import 'app_shell.dart';
 
 class _RouterRefreshNotifier extends ChangeNotifier {
@@ -85,12 +89,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/profile/analytics', builder: (context, state) => const SpendingPatternsScreen()),
       GoRoute(path: '/profile/privacy', builder: (context, state) => const PrivacyPolicyScreen()),
       GoRoute(path: '/profile/terms', builder: (context, state) => const TermsOfServiceScreen()),
+      GoRoute(path: '/controller/exceptions', builder: (context, state) => const ExceptionsListScreen()),
+      GoRoute(
+        path: '/controller/exceptions/:id',
+        builder: (context, state) => ExceptionDetailScreen(
+          exception: state.extra as TransactionException,
+        ),
+      ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) => AppShell(navigationShell: navigationShell),
         branches: [
           StatefulShellBranch(routes: [GoRoute(path: '/shell/overview', builder: (context, state) => const OverviewScreen())]),
           StatefulShellBranch(routes: [GoRoute(path: '/shell/signals', builder: (context, state) => const SignalsScreen())]),
           StatefulShellBranch(routes: [GoRoute(path: '/shell/activity', builder: (context, state) => const ActivityScreen())]),
+          StatefulShellBranch(routes: [GoRoute(path: '/shell/controller', builder: (context, state) => const ControllerScreen())]),
         ],
       ),
     ],
