@@ -91,6 +91,40 @@ class TestAmountMatcher(unittest.TestCase):
         self.assertEqual(score, 0.5)
 
 
+class TestAmountMatcherToleranceMatrix(unittest.TestCase):
+    """Phase 3 regression tests: the exact matrix EDGE_CASE_REPORT.md finding
+    2 and the qualification spec call out. absolute_floor=2.0 (default)."""
+
+    def setUp(self):
+        self.matcher = AmountMatcher()
+
+    def test_one_rupee_diff_on_ten_rupee_base(self):
+        self.assertEqual(self.matcher.score(10.0, 9.0), 0.85)
+
+    def test_one_rupee_diff_on_hundred_rupee_base(self):
+        self.assertEqual(self.matcher.score(100.0, 99.0), 0.85)
+
+    def test_one_rupee_diff_on_five_thousand_rupee_base(self):
+        self.assertEqual(self.matcher.score(5000.0, 4999.0), 0.85)
+
+    def test_hundred_rupee_diff_on_five_thousand_rupee_base(self):
+        """Rs 100 on Rs 5000 (2%) is beyond the Rs 2 absolute floor but
+        within the 5% proportional band -> tolerance_weight, not near_exact."""
+        self.assertEqual(self.matcher.score(5000.0, 4900.0), 0.7)
+
+    def test_exact_amount_scores_perfectly_regardless_of_size(self):
+        self.assertEqual(self.matcher.score(5000.0, 5000.0), 1.0)
+        self.assertEqual(self.matcher.score(10.0, 10.0), 1.0)
+
+    def test_significant_mismatch_still_scores_zero(self):
+        """A large discrepancy must never be absorbed by either tier - the
+        absolute floor only covers genuine rounding noise (<= Rs 2), and the
+        proportional band still hard-fails beyond 5% of the query amount.
+        This is the safety property the fix must not weaken."""
+        self.assertEqual(self.matcher.score(5000.0, 1000.0), 0.0)
+        self.assertEqual(self.matcher.score(500.0, 400.0), 0.0)  # Rs 100 / 20% on a small base
+
+
 class TestTemporalProximityMatcher(unittest.TestCase):
     """Test temporal proximity matching."""
 

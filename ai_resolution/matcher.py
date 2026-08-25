@@ -228,17 +228,58 @@ class NameSimilarityMatcher:
 
 
 class AmountMatcher:
-    """Matches transactions by amount with configurable tolerance."""
+    """Matches transactions by amount with a two-tier tolerance: an absolute
+    floor for rounding/FX noise, then a proportional band for larger
+    transactions.
 
-    def __init__(self, exact_weight: float = 1.0, tolerance_pct: float = 0.05):
+    Percentage-only tolerance (the previous design) is systematically harsher
+    on small transactions than large ones for the exact same absolute noise:
+    a Rs 1 diff is 10% of a Rs 10 fare but 0.02% of a Rs 5,000 purchase, so
+    only the latter survived a flat 5% band (EDGE_CASE_REPORT.md finding 2).
+    Real-world rounding/FX noise is an absolute quantity, not a fraction of
+    the transaction - so it needs an absolute floor that applies regardless
+    of amount, on top of (not instead of) the existing proportional band for
+    larger, non-trivial discrepancies.
+
+    Four deterministic tiers, evaluated in order:
+      1. Exact match                                -> exact_weight (1.0)
+      2. abs(diff) <= absolute_floor                 -> near_exact_weight (0.85)
+         (rounding/FX noise - an absolute quantity, independent of amount)
+      3. abs(diff) <= max(absolute_floor, amount * tolerance_pct)
+                                                       -> tolerance_weight (0.7)
+         (proportional band - meaningful for larger transactions)
+      4. anything else                               -> 0.0 (a real mismatch)
+
+    This only ever *adds* credit for small absolute diffs that used to score
+    0 - it never grants credit to a discrepancy that already failed the
+    proportional band, so it cannot turn a large financial mismatch into a
+    high-confidence match.
+    """
+
+    def __init__(
+        self,
+        exact_weight: float = 1.0,
+        tolerance_pct: float = 0.05,
+        absolute_floor: float = 2.0,
+        near_exact_weight: float = 0.85,
+        tolerance_weight: float = 0.7,
+    ):
         """Initialize with match strategy.
 
         Args:
             exact_weight: Score for exact amount match (default 1.0).
-            tolerance_pct: Fractional tolerance (e.g., 0.05 = ±5%).
+            tolerance_pct: Fractional tolerance for the proportional band
+                (e.g., 0.05 = +/-5%).
+            absolute_floor: Absolute rupee tolerance applied regardless of
+                amount, for rounding/FX noise (default Rs 2).
+            near_exact_weight: Score for a diff within absolute_floor.
+            tolerance_weight: Score for a diff within the proportional band.
         """
         self.exact_weight = exact_weight
         self.tolerance_pct = tolerance_pct
+        self.absolute_floor = absolute_floor
+        self.near_exact_weight = near_exact_weight
+        self.tolerance_weight = tolerance_weight
 
     def score(self, query_amount: Optional[float], candidate_amount: Optional[float]) -> float:
         """Score match between two amounts.
@@ -253,12 +294,17 @@ class AmountMatcher:
         if query_amount is None or candidate_amount is None:
             return 0.5  # Neutral if missing data
 
-        if query_amount == candidate_amount:
+        diff = abs(query_amount - candidate_amount)
+
+        if diff == 0:
             return self.exact_weight
 
-        tolerance = query_amount * self.tolerance_pct
-        if abs(query_amount - candidate_amount) <= tolerance:
-            return 0.7  # Partial credit for within-tolerance match
+        if diff <= self.absolute_floor:
+            return self.near_exact_weight
+
+        tolerance = max(self.absolute_floor, query_amount * self.tolerance_pct)
+        if diff <= tolerance:
+            return self.tolerance_weight
 
         return 0.0
 
