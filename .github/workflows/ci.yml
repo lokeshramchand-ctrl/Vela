@@ -116,6 +116,8 @@ jobs:
         run: pytest features/test_periodicity.py -v
       - name: Run PDF ingestion hardening tests
         run: pytest evaluation/test_pdf_ingestion_hardening.py -v
+      - name: Run live-MongoDB integration tests (merchant resolver, transaction dedup)
+        run: pytest evaluation/test_mongo_integration.py -v
 
   # --- Frontend (Flutter) ---
   frontend:
