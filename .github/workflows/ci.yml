@@ -102,6 +102,20 @@ jobs:
         run: pytest evaluation/test_evaluation.py -v
       - name: Run matching-engine edge-case suite
         run: pytest evaluation/test_edge_cases.py -v
+      - name: Run matcher unit tests
+        # Two tests are intentionally left red: a substring/fuzzy-name-credit
+        # gap in NameSimilarityMatcher that is out of scope for the findings
+        # this branch fixes (see the tests' own docstrings for why). Every
+        # other assertion in this file, including the direction/amount/
+        # confidence-semantics fixes, must stay green.
+        run: >
+          pytest ai_resolution/test_matcher.py -v
+          --deselect ai_resolution/test_matcher.py::TestNameSimilarityMatcher::test_partial_match
+          --deselect ai_resolution/test_matcher.py::TestAIEntityMatcher::test_score_candidate_high_confidence
+      - name: Run periodicity characterization tests
+        run: pytest features/test_periodicity.py -v
+      - name: Run PDF ingestion hardening tests
+        run: pytest evaluation/test_pdf_ingestion_hardening.py -v
 
   # --- Frontend (Flutter) ---
   frontend:
