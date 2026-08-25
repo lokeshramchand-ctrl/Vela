@@ -20,6 +20,15 @@ __pycache__/
 # Ignore node modules if present
 node_modules/
 
+
 # Ignore IDE configs
 .vscode/
 .idea/
+
+# Real personal Google Pay statement (Phase 7/15, testing/edge-case-matching
+# branch): contains real phone number, email, and counterparty names, unlike
+# the synthetic mock/gpay_statement_20260101_20260630.pdf fixture. Untracked
+# going forward (git rm --cached) but kept on disk locally for tests that use
+# it - see evaluation/test_edge_cases.py, which skips those tests gracefully
+# when this file isn't present (e.g. in a fresh CI checkout).
+assets/gpay_statement_20260201_20260731.pdf

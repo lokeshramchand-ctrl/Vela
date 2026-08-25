@@ -17,6 +17,7 @@ evaluation/EDGE_CASE_REPORT.md. Nothing in ai_resolution/matcher.py or
 statements/pdf_parser.py is modified by this suite.
 """
 
+import os
 import unittest
 from datetime import datetime, timedelta
 
@@ -28,6 +29,17 @@ from statements.pdf_parser import (
 )
 
 BASE_DATE = datetime(2026, 3, 1)
+
+# assets/gpay_statement_20260201_20260731.pdf is a real personal Google Pay
+# statement (Phase 7/15 finding), not a synthetic fixture - it's gitignored
+# and untracked as of this branch, kept on disk locally only. Tests that use
+# it skip gracefully rather than fail when it isn't present, e.g. in a fresh
+# CI checkout.
+_REAL_STATEMENT_PATH = "assets/gpay_statement_20260201_20260731.pdf"
+_skip_unless_real_statement_present = unittest.skipUnless(
+    os.path.exists(_REAL_STATEMENT_PATH),
+    f"{_REAL_STATEMENT_PATH} is gitignored/untracked and not present in this checkout",
+)
 
 
 class MatchingEngineEdgeCases(unittest.TestCase):
@@ -386,6 +398,7 @@ class PDFIngestionEdgeCases(unittest.TestCase):
         self.assertEqual(statement_parser.parse_transactions(""), [])
 
     # 18. Duplicate upload -----------------------------------------------------------------
+    @_skip_unless_real_statement_present
     def test_parsing_the_same_upload_twice_is_deterministic(self):
         """The parser itself has no dedup responsibility (dedup happens at
         repositories/transaction_repository.py via an upsert on
@@ -411,11 +424,12 @@ class PDFIngestionEdgeCases(unittest.TestCase):
             [(t.amount, t.counterparty_raw, t.timestamp) for t in second],
         )
 
+    @_skip_unless_real_statement_present
     def test_real_statement_end_to_end_smoke(self):
         """Sanity check that the whole pipeline still works on a genuinely
         valid statement, so the malformed-file tests above are contrasted
         against a known-good baseline rather than tested in isolation."""
-        with open("assets/gpay_statement_20260201_20260731.pdf", "rb") as f:
+        with open(_REAL_STATEMENT_PATH, "rb") as f:
             raw = f.read()
         page_count, _ = statement_parser.open_and_inspect(raw)
         text = statement_parser.extract_text(raw)
@@ -427,6 +441,70 @@ class PDFIngestionEdgeCases(unittest.TestCase):
         for t in txns:
             self.assertIn(t.direction, ("Paid to", "Received from"))
             self.assertGreater(t.amount, 0)
+
+    # Phase 7 -----------------------------------------------------------------
+    @_skip_unless_real_statement_present
+    def test_real_statement_reconciles_against_its_own_declared_totals(self):
+        """Structural "no silent transaction loss" check (Phase 7), without
+        asserting or printing any individual transaction's content: sums
+        every parsed DEBIT ("Paid to") and CREDIT ("Received from") amount
+        and compares against the statement's own page-1 declared Sent/
+        Received totals (parse_declared_totals()). If parsing silently
+        dropped or double-counted a record, this sum would drift from the
+        statement's own header - the same reconciliation check
+        statements/statement_service.py runs in production
+        (_check_reconciliation, epsilon 0.01)."""
+        with open(_REAL_STATEMENT_PATH, "rb") as f:
+            raw = f.read()
+        text = statement_parser.extract_text(raw)
+        txns = statement_parser.parse_transactions(text)
+        declared_sent, declared_received = statement_parser.parse_declared_totals(text)
+
+        computed_sent = round(sum(t.amount for t in txns if t.direction == "Paid to"), 2)
+        computed_received = round(sum(t.amount for t in txns if t.direction == "Received from"), 2)
+
+        self.assertIsNotNone(declared_sent)
+        self.assertIsNotNone(declared_received)
+        self.assertAlmostEqual(computed_sent, declared_sent, delta=0.01)
+        self.assertAlmostEqual(computed_received, declared_received, delta=0.01)
+
+    @_skip_unless_real_statement_present
+    def test_real_statement_every_transaction_has_required_fields_and_provenance(self):
+        """Structural field/provenance/date-validity checks (Phase 7), again
+        without asserting on or printing any specific counterparty name or
+        amount - only that every record has the shape downstream Vela code
+        (repositories/transaction_repository.py, models.schemas.Transaction)
+        requires."""
+        with open(_REAL_STATEMENT_PATH, "rb") as f:
+            raw = f.read()
+        text = statement_parser.extract_text(raw)
+        txns = statement_parser.parse_transactions(text)
+        period_start, period_end = statement_parser.parse_period(text)
+
+        self.assertGreater(len(txns), 0)
+        reference_numbers = [t.reference_number for t in txns]
+        self.assertEqual(len(reference_numbers), len(set(reference_numbers)), "duplicate reference_number within one statement")
+
+        for t in txns:
+            self.assertTrue(t.reference_number)  # source provenance / dedup key
+            self.assertTrue(t.bank)               # source provenance
+            self.assertGreater(t.amount, 0)
+            self.assertIsNotNone(t.timestamp)
+            self.assertGreaterEqual(t.timestamp.date(), period_start)
+            self.assertLessEqual(t.timestamp.date(), period_end)
+
+    @_skip_unless_real_statement_present
+    def test_real_statement_processing_is_stable_across_repeated_runs(self):
+        """Same determinism property test 18 establishes, phrased as its own
+        Phase 7 "stable repeated processing" check: parsing the real
+        statement's extracted text three times in a row must always yield
+        the same transaction count - no run-to-run drift from anything
+        order-dependent (dict/set iteration, regex state, etc.)."""
+        with open(_REAL_STATEMENT_PATH, "rb") as f:
+            raw = f.read()
+        text = statement_parser.extract_text(raw)
+        counts = {len(statement_parser.parse_transactions(text)) for _ in range(3)}
+        self.assertEqual(len(counts), 1)
 
 
 if __name__ == "__main__":
