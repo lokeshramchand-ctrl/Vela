@@ -76,10 +76,17 @@ class ScoringFactors:
                 "trust_state_factor": 0.10,
             }
 
+        # Weight keys ("name_similarity", "trust_state_factor", ...) match
+        # ScoringFactors' field names exactly - previously this stripped a
+        # "_factor" suffix before the lookup, which only ever matched a
+        # non-existent "trust_state" attribute and silently dropped
+        # trust_state_factor's entire 0.10 weight from every aggregate,
+        # capping the best possible score at 0.90 regardless of how strong
+        # every other signal was.
         total = sum(
-            getattr(self, k.replace("_factor", ""), 0) * v
+            getattr(self, k, 0) * v
             for k, v in weights.items()
-            if k.replace("_factor", "") in self.__dict__
+            if k in self.__dict__
         )
         return min(1.0, max(0.0, total))
 
@@ -203,11 +210,19 @@ class NameSimilarityMatcher:
         """
         lev = self.levenshtein_ratio(query, candidate)
         abbrev = 1.0 if self.is_abbreviation_match(query, candidate) else 0.0
+        # A byte-identical name (modulo whitespace/case) is the strongest
+        # possible signal this matcher can see - the 'exact_alias' weight
+        # exists specifically to credit it, separately from Levenshtein
+        # (which already returns 1.0 for identical strings, but only carries
+        # its own 0.50 weight) and from the abbreviation stub (which only
+        # covers a hardcoded few merchants).
+        exact = 1.0 if query.strip().upper() == candidate.strip().upper() else 0.0
 
         # Weighted sum
         score = (
             lev * self.weights["levenshtein"]
             + abbrev * self.weights["abbreviation"]
+            + exact * self.weights["exact_alias"]
         )
         return min(1.0, score)
 

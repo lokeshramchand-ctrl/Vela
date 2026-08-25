@@ -72,49 +72,50 @@ class TestDatasetGroundTruth(unittest.TestCase):
 
 
 class TestConfidenceCeilingFinding(unittest.TestCase):
-    """Documents a finding this evaluation surfaced in the existing matcher:
-    AUTO_MATCH (>0.90) is mathematically unreachable as currently coded.
+    """FIXED in Phase 2 (testing/edge-case-matching branch). This class used
+    to document that AUTO_MATCH (>0.90) was mathematically unreachable.
 
-    `ScoringFactors.aggregate()` (ai_resolution/matcher.py:78-83) builds its
-    weighted sum by looking up `getattr(self, key.replace("_factor", ""))` for
-    each weight key. For "trust_state_factor" that strips to "trust_state",
-    which is not an attribute on ScoringFactors (the real attribute is
-    "trust_state_factor") - so `trust_state_factor` is silently dropped from
-    every confidence score, contributing exactly zero regardless of its value.
+    Two compounding bugs caused it:
 
-    Combined with the other factors' own caps - name_similarity tops out at
-    0.80 (NameSimilarityMatcher.score(): 0.50 levenshtein + 0.30 abbreviation,
-    with the "exact_alias" weight defined but never applied), and
-    historical_context tops out at 0.95 - the maximum aggregate confidence
-    obtainable from *any* input is fixed at 0.8425, below the 0.90 AUTO_MATCH
-    wall. In its current form, this router can never fully automate a match;
-    every match, however clean, is routed to human review at best.
+    1. `ScoringFactors.aggregate()` built its weighted sum by looking up
+       `getattr(self, key.replace("_factor", ""))` for each weight key. For
+       "trust_state_factor" that stripped to "trust_state", which was never
+       an attribute on ScoringFactors (the real attribute is
+       "trust_state_factor") - so that weight's entire 0.10 contribution was
+       silently dropped from every aggregate, regardless of its value.
+    2. `NameSimilarityMatcher.score()` declared an "exact_alias" weight
+       (0.20) but never multiplied it into the score, so even a
+       byte-identical merchant name topped out at 0.50-0.80 instead of up
+       to 1.0.
 
-    This is not a defect in the Wave 8 dataset or harness - it is a property
-    of the shipped scoring code, verified here directly against
-    ScoringFactors and AIEntityMatcher with the best possible inputs.
+    Fixing only one of the two still left the best case just under 0.90
+    (see ai_resolution/matcher.py's score() and ScoringFactors.aggregate()
+    for the fix and evaluation/EDGE_CASE_REPORT.md finding 1 for the
+    original diagnosis). With both fixed, the true ceiling is ~0.996 and a
+    maximal-trust exact match now clears AUTO_MATCH - verified here against
+    ScoringFactors and AIEntityMatcher directly, not just re-asserted.
     """
 
-    def test_maximum_possible_confidence_is_below_auto_match_wall(self):
+    def test_maximum_possible_confidence_now_clears_the_auto_match_wall(self):
         best_case = ScoringFactors(
-            name_similarity=0.80,  # NameSimilarityMatcher.score() ceiling
+            name_similarity=1.0,  # exact + abbreviation match, post-fix ceiling
             amount_match=1.0,  # exact amount match
             temporal_proximity=1.0,  # same-day
             historical_context=0.95,  # >20 historical encounters ceiling
-            trust_state_factor=1.15,  # PERMANENT trust, silently dropped
+            trust_state_factor=1.15,  # PERMANENT trust, now applied
         )
-        self.assertAlmostEqual(best_case.aggregate(), 0.8425, places=4)
-        self.assertLess(best_case.aggregate(), AIEntityMatcher().high_confidence_threshold)
+        self.assertAlmostEqual(best_case.aggregate(), 1.0, places=3)
+        self.assertGreaterEqual(best_case.aggregate(), AIEntityMatcher().high_confidence_threshold)
 
-    def test_trust_state_factor_does_not_affect_aggregate(self):
+    def test_trust_state_factor_now_affects_aggregate(self):
         low_trust = ScoringFactors(0.80, 1.0, 1.0, 0.95, trust_state_factor=0.0)
         high_trust = ScoringFactors(0.80, 1.0, 1.0, 0.95, trust_state_factor=100.0)
-        self.assertEqual(low_trust.aggregate(), high_trust.aggregate())
+        self.assertLess(low_trust.aggregate(), high_trust.aggregate())
 
-    def test_ideal_ubers_style_case_still_lands_in_human_review(self):
+    def test_ideal_ubers_style_case_now_reaches_auto_match(self):
         """An abbreviation-boosted, exact-amount, same-day, well-known-merchant
-        match - about as strong a case as the matcher can ever see - still
-        does not clear the AUTO_MATCH wall."""
+        match with maximal historical trust - about as strong a case as the
+        matcher can ever see - now clears the AUTO_MATCH wall."""
         matcher = AIEntityMatcher()
         candidate = matcher.score_candidate(
             query_text="UBER",
@@ -126,7 +127,7 @@ class TestConfidenceCeilingFinding(unittest.TestCase):
             historical_encounters=25,
             trust_state="PERMANENT",
         )
-        self.assertEqual(matcher.route_by_confidence_wall(candidate), ConfidenceWall.HUMAN_REVIEW)
+        self.assertEqual(matcher.route_by_confidence_wall(candidate), ConfidenceWall.AUTO_MATCH)
 
 
 class TestEvaluationHarness(unittest.TestCase):
