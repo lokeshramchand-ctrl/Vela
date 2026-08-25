@@ -122,6 +122,8 @@ jobs:
         run: pytest evaluation/test_track04_benchmark.py -v
       - name: Run deterministic baseline vs full Vela comparison tests
         run: pytest evaluation/test_deterministic_baseline.py -v
+      - name: Run confidence-wall policy tests
+        run: pytest evaluation/test_confidence_wall_policy.py -v
 
   # --- Frontend (Flutter) ---
   frontend:
