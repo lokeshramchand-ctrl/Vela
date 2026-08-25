@@ -22,6 +22,7 @@ import '../../features/upload/presentation/rejected_screen.dart';
 import '../../features/controller/presentation/controller_screen.dart';
 import '../../features/controller/presentation/exceptions_list_screen.dart';
 import '../../features/controller/presentation/exception_detail_screen.dart';
+import '../../features/controller/presentation/cash_position_screen.dart';
 import '../../features/controller/domain/exception.dart';
 import 'app_shell.dart';
 
@@ -90,6 +91,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/profile/privacy', builder: (context, state) => const PrivacyPolicyScreen()),
       GoRoute(path: '/profile/terms', builder: (context, state) => const TermsOfServiceScreen()),
       GoRoute(path: '/controller/exceptions', builder: (context, state) => const ExceptionsListScreen()),
+      GoRoute(path: '/controller/cash-position', builder: (context, state) => const CashPositionScreen()),
       GoRoute(
         path: '/controller/exceptions/:id',
         builder: (context, state) => ExceptionDetailScreen(

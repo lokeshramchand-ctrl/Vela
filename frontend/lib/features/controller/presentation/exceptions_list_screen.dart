@@ -25,9 +25,8 @@ class ExceptionsListScreen extends ConsumerWidget {
         backgroundColor: AppColors.paper,
         elevation: 0,
         title: const Text('Review Exceptions'),
-        titleTextStyle: AppTypography.title3.copyWith(
-          color: AppColors.textPrimary,
-          fontWeight: FontWeight.w600,
+        titleTextStyle: AppTypography.navTitle15.copyWith(
+          color: AppColors.onLight,
         ),
       ),
       body: controllerState.isLoading
@@ -43,7 +42,7 @@ class ExceptionsListScreen extends ConsumerWidget {
               subtitle: 'All transactions have been resolved',
             )
             : ListView.builder(
-              padding: EdgeInsets.all(AppSpacing.lg),
+              padding: EdgeInsets.all(AppSpacing.gutter),
               itemCount: controllerState.exceptions.length,
               itemBuilder: (context, index) {
                 final exception = controllerState.exceptions[index];
@@ -79,12 +78,12 @@ class _ExceptionListItem extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: AppRadius.md,
+          borderRadius: BorderRadius.circular(AppRadius.card),
           child: Container(
             decoration: BoxDecoration(
-              color: AppColors.cardBackground,
-              borderRadius: AppRadius.md,
-              border: Border.all(color: AppColors.divider, width: 1),
+              color: AppColors.card,
+              borderRadius: BorderRadius.circular(AppRadius.card),
+              border: Border.all(color: AppColors.hairlineLight, width: 1),
             ),
             padding: EdgeInsets.all(AppSpacing.md),
             child: Column(
@@ -99,16 +98,15 @@ class _ExceptionListItem extends StatelessWidget {
                         children: [
                           Text(
                             exception.sourceAMerchant,
-                            style: AppTypography.body1.copyWith(
-                              color: AppColors.textPrimary,
-                              fontWeight: FontWeight.w600,
+                            style: AppTypography.rowLabel145.copyWith(
+                              color: AppColors.onLight,
                             ),
                           ),
                           SizedBox(height: AppSpacing.xs),
                           Text(
                             exception.sourceBMerchant,
-                            style: AppTypography.caption.copyWith(
-                              color: AppColors.textSecondary,
+                            style: AppTypography.footnote12.copyWith(
+                              color: AppColors.onLightMuted,
                             ),
                           ),
                         ],
@@ -116,8 +114,8 @@ class _ExceptionListItem extends StatelessWidget {
                     ),
                     Container(
                       decoration: BoxDecoration(
-                        color: AppColors.accentOrange.withOpacity(0.1),
-                        borderRadius: AppRadius.sm,
+                        color: AppColors.amberTint,
+                        borderRadius: BorderRadius.circular(AppRadius.chip),
                       ),
                       padding: EdgeInsets.symmetric(
                         horizontal: AppSpacing.sm,
@@ -125,9 +123,8 @@ class _ExceptionListItem extends StatelessWidget {
                       ),
                       child: Text(
                         '${(exception.confidence * 100).toStringAsFixed(0)}%',
-                        style: AppTypography.caption.copyWith(
-                          color: AppColors.accentOrange,
-                          fontWeight: FontWeight.w600,
+                        style: AppTypography.metaBold12.copyWith(
+                          color: AppColors.amberInk,
                         ),
                       ),
                     ),
@@ -142,17 +139,16 @@ class _ExceptionListItem extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Amount mismatch',
-                            style: AppTypography.caption.copyWith(
-                              color: AppColors.textSecondary,
+                            exception.issue,
+                            style: AppTypography.footnote12.copyWith(
+                              color: AppColors.onLightMuted,
                             ),
                           ),
                           SizedBox(height: AppSpacing.xs),
                           Text(
-                            '${Formatters.formatCurrency(exception.sourceAAmount)} vs ${Formatters.formatCurrency(exception.sourceBAmount)}',
-                            style: AppTypography.body2.copyWith(
-                              color: AppColors.accentRed,
-                              fontWeight: FontWeight.w600,
+                            '${formatCurrency(exception.sourceAAmount)} vs ${formatCurrency(exception.sourceBAmount)}',
+                            style: AppTypography.cardBody15.copyWith(
+                              color: AppColors.roseInk,
                             ),
                           ),
                         ],
@@ -160,7 +156,7 @@ class _ExceptionListItem extends StatelessWidget {
                     ),
                     Icon(
                       Icons.chevron_right,
-                      color: AppColors.textSecondary,
+                      color: AppColors.onLightMuted,
                     ),
                   ],
                 ),
@@ -179,14 +175,11 @@ class _ExceptionsSkeleton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
-      padding: EdgeInsets.all(AppSpacing.lg),
+      padding: EdgeInsets.all(AppSpacing.gutter),
       itemCount: 5,
-      itemBuilder: (_) => Padding(
+      itemBuilder: (context, index) => Padding(
         padding: EdgeInsets.only(bottom: AppSpacing.md),
-        child: Skeleton(
-          height: 100,
-          borderRadius: AppRadius.md,
-        ),
+        child: SkeletonBox(width: double.infinity, height: 100, radius: AppRadius.card),
       ),
     );
   }

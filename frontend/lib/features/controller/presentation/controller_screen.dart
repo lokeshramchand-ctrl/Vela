@@ -10,6 +10,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../shared/widgets/app_buttons.dart';
 import '../../../shared/widgets/error_retry.dart';
 import '../../../shared/widgets/skeleton.dart';
+import '../domain/cash_position.dart';
 import 'controller_controller.dart';
 
 class ControllerScreen extends ConsumerWidget {
@@ -25,14 +26,14 @@ class ControllerScreen extends ConsumerWidget {
         backgroundColor: AppColors.paper,
         elevation: 0,
         title: const Text('VELA FINANCE CONTROLLER'),
-        titleTextStyle: AppTypography.title3.copyWith(
-          color: AppColors.textPrimary,
-          fontWeight: FontWeight.w600,
+        titleTextStyle: AppTypography.navTitle15.copyWith(
+          color: AppColors.onLight,
         ),
         centerTitle: false,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
+            color: AppColors.onLight,
             onPressed: () {
               ref.read(controllerProvider.notifier).refresh();
             },
@@ -46,11 +47,18 @@ class ControllerScreen extends ConsumerWidget {
             onRetry: () => ref.read(controllerProvider.notifier).refresh(),
           )
           : SingleChildScrollView(
-            padding: EdgeInsets.all(AppSpacing.lg),
+            padding: EdgeInsets.all(AppSpacing.gutter),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _StatsGrid(stats: controllerState.stats),
+                SizedBox(height: AppSpacing.lg),
+                _CashPositionSection(
+                  cashPosition: controllerState.cashPosition,
+                  onView: () {
+                    context.push('/controller/cash-position');
+                  },
+                ),
                 SizedBox(height: AppSpacing.lg),
                 _ExceptionSection(
                   exceptions: controllerState.exceptions,
@@ -81,26 +89,27 @@ class _StatsGrid extends StatelessWidget {
           physics: const NeverScrollableScrollPhysics(),
           mainAxisSpacing: AppSpacing.md,
           crossAxisSpacing: AppSpacing.md,
+          childAspectRatio: 1.6,
           children: [
             _StatCard(
               label: 'Records processed',
               value: stats.recordsProcessed.toString(),
-              color: AppColors.brandPrimary,
+              color: AppColors.accentDim,
             ),
             _StatCard(
               label: 'Matched',
               value: stats.matched.toString(),
-              color: AppColors.accentGreen,
+              color: AppColors.accentDim,
             ),
             _StatCard(
               label: 'Exceptions',
               value: stats.exceptions.toString(),
-              color: AppColors.accentOrange,
+              color: AppColors.amberInk,
             ),
             _StatCard(
               label: 'Unresolved',
               value: stats.unresolved.toString(),
-              color: AppColors.accentRed,
+              color: AppColors.roseInk,
             ),
           ],
         ),
@@ -112,7 +121,7 @@ class _StatsGrid extends StatelessWidget {
         SizedBox(height: AppSpacing.md),
         _MetricCard(
           label: 'Amount reconciled',
-          value: Formatters.formatCurrency(stats.amountReconciled),
+          value: formatCurrency(stats.amountReconciled),
         ),
       ],
     );
@@ -134,9 +143,9 @@ class _StatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.cardBackground,
-        borderRadius: AppRadius.md,
-        border: Border.all(color: AppColors.divider, width: 1),
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: AppColors.hairlineLight, width: 1),
       ),
       padding: EdgeInsets.all(AppSpacing.md),
       child: Column(
@@ -145,15 +154,14 @@ class _StatCard extends StatelessWidget {
         children: [
           Text(
             label,
-            style: AppTypography.caption.copyWith(
-              color: AppColors.textSecondary,
+            style: AppTypography.footnote12.copyWith(
+              color: AppColors.onLightMuted,
             ),
           ),
           Text(
             value,
-            style: AppTypography.headline2.copyWith(
+            style: AppTypography.bigHeadline26.copyWith(
               color: color,
-              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -175,9 +183,9 @@ class _MetricCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.cardBackground,
-        borderRadius: AppRadius.md,
-        border: Border.all(color: AppColors.divider, width: 1),
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: AppColors.hairlineLight, width: 1),
       ),
       padding: EdgeInsets.all(AppSpacing.md),
       child: Row(
@@ -185,18 +193,76 @@ class _MetricCard extends StatelessWidget {
         children: [
           Text(
             label,
-            style: AppTypography.body2.copyWith(
-              color: AppColors.textSecondary,
+            style: AppTypography.cardBody15.copyWith(
+              color: AppColors.onLightMuted,
             ),
           ),
           Text(
             value,
-            style: AppTypography.title3.copyWith(
-              color: AppColors.textPrimary,
-              fontWeight: FontWeight.w600,
+            style: AppTypography.amountMedium19.copyWith(
+              color: AppColors.onLight,
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _CashPositionSection extends StatelessWidget {
+  final CashPosition? cashPosition;
+  final VoidCallback onView;
+
+  const _CashPositionSection({
+    required this.cashPosition,
+    required this.onView,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cashPosition = this.cashPosition;
+    if (cashPosition == null) return const SizedBox.shrink();
+
+    final isBalanced = cashPosition.isBalanced;
+    final varianceColor = isBalanced ? AppColors.accentDim : AppColors.roseInk;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onView,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(AppRadius.card),
+            border: Border.all(color: AppColors.hairlineLight, width: 1),
+          ),
+          padding: EdgeInsets.all(AppSpacing.md),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Cash position',
+                    style: AppTypography.footnote12.copyWith(
+                      color: AppColors.onLightMuted,
+                    ),
+                  ),
+                  SizedBox(height: AppSpacing.xs),
+                  Text(
+                    isBalanced ? 'Books balance' : 'Variance ${formatCurrency(cashPosition.variance, forceSign: true)}',
+                    style: AppTypography.amountMedium19.copyWith(
+                      color: varianceColor,
+                    ),
+                  ),
+                ],
+              ),
+              Icon(Icons.chevron_right, color: AppColors.onLightMuted),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -218,72 +284,69 @@ class _ExceptionSection extends StatelessWidget {
       children: [
         Text(
           'Exceptions',
-          style: AppTypography.title2.copyWith(
-            color: AppColors.textPrimary,
-            fontWeight: FontWeight.w600,
+          style: AppTypography.bigHeadline22.copyWith(
+            color: AppColors.onLight,
           ),
         ),
         SizedBox(height: AppSpacing.md),
         if (exceptions.isEmpty)
           Container(
             decoration: BoxDecoration(
-              color: AppColors.cardBackground,
-              borderRadius: AppRadius.md,
-              border: Border.all(color: AppColors.divider, width: 1),
+              color: AppColors.card,
+              borderRadius: BorderRadius.circular(AppRadius.card),
+              border: Border.all(color: AppColors.hairlineLight, width: 1),
             ),
             padding: EdgeInsets.all(AppSpacing.lg),
             child: Center(
               child: Text(
                 'No exceptions to review',
-                style: AppTypography.body2.copyWith(
-                  color: AppColors.textSecondary,
+                style: AppTypography.cardBody15.copyWith(
+                  color: AppColors.onLightMuted,
                 ),
               ),
             ),
           )
         else
-          Column(
-            children: [
-              Container(
-                decoration: BoxDecoration(
-                  color: AppColors.accentOrange.withOpacity(0.05),
-                  borderRadius: AppRadius.md,
-                  border: Border.all(
-                    color: AppColors.accentOrange.withOpacity(0.3),
-                    width: 1,
+          Container(
+            decoration: BoxDecoration(
+              color: AppColors.amberTint,
+              borderRadius: BorderRadius.circular(AppRadius.card),
+              border: Border.all(
+                color: AppColors.amber.withValues(alpha: 0.4),
+                width: 1,
+              ),
+            ),
+            padding: EdgeInsets.all(AppSpacing.md),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${exceptions.length} exceptions pending',
+                        style: AppTypography.rowLabel145.copyWith(
+                          color: AppColors.onLight,
+                        ),
+                      ),
+                      SizedBox(height: AppSpacing.xs),
+                      Text(
+                        'Review and resolve transaction mismatches',
+                        style: AppTypography.footnote12.copyWith(
+                          color: AppColors.onLightMuted,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                padding: EdgeInsets.all(AppSpacing.md),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${exceptions.length} exceptions pending',
-                          style: AppTypography.body1.copyWith(
-                            color: AppColors.textPrimary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        SizedBox(height: AppSpacing.xs),
-                        Text(
-                          'Review and resolve transaction mismatches',
-                          style: AppTypography.caption.copyWith(
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                    AppButton.primary(
-                      onPressed: onReview,
-                      child: const Text('Review'),
-                    ),
-                  ],
+                PrimaryPillButton(
+                  label: 'Review',
+                  expand: false,
+                  onPressed: onReview,
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
       ],
     );
@@ -296,7 +359,7 @@ class _ControllerSkeleton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: EdgeInsets.all(AppSpacing.lg),
+      padding: EdgeInsets.all(AppSpacing.gutter),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -306,24 +369,16 @@ class _ControllerSkeleton extends StatelessWidget {
             physics: const NeverScrollableScrollPhysics(),
             mainAxisSpacing: AppSpacing.md,
             crossAxisSpacing: AppSpacing.md,
+            childAspectRatio: 1.6,
             children: List.generate(
               4,
-              (_) => Skeleton(
-                height: 120,
-                borderRadius: AppRadius.md,
-              ),
+              (_) => SkeletonBox(width: double.infinity, height: 100, radius: AppRadius.card),
             ),
           ),
           SizedBox(height: AppSpacing.lg),
-          Skeleton(
-            height: 80,
-            borderRadius: AppRadius.md,
-          ),
+          SkeletonBox(width: double.infinity, height: 64, radius: AppRadius.card),
           SizedBox(height: AppSpacing.md),
-          Skeleton(
-            height: 80,
-            borderRadius: AppRadius.md,
-          ),
+          SkeletonBox(width: double.infinity, height: 64, radius: AppRadius.card),
         ],
       ),
     );
