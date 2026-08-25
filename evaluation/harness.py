@@ -26,6 +26,17 @@ COST_FALSE_MATCH = 50.0
 COST_UNRESOLVED = 1.0
 COST_CORRECT_AUTO_MATCH = 0.0
 
+# Categories where a real correct partner exists (true_b_id is set on the
+# GroundTruthCase). CaseCategory.TRUE_MATCH is the original Wave 8 category;
+# RECURRING and PARTIAL_METADATA (Phase 8) are also genuine true-match cases,
+# just stressing a different signal (temporal gap / missing metadata) than
+# the original TRUE_MATCH cases. Every other category (KNOWN_EXCEPTION,
+# AMBIGUOUS, DIRECTION_CONFLICT, MISSING_RECORD, DUPLICATE_CANDIDATE) has no
+# defensible single correct answer by construction.
+_TRUE_MATCH_CATEGORIES = frozenset({
+    CaseCategory.TRUE_MATCH, CaseCategory.RECURRING, CaseCategory.PARTIAL_METADATA,
+})
+
 
 class Outcome(str, Enum):
     CORRECT_AUTO_MATCH = "correct_auto_match"  # AUTO_MATCH and right - fully automated
@@ -74,7 +85,7 @@ class EvaluationResult:
 
     @property
     def true_match_total(self) -> int:
-        return sum(1 for c in self.case_results if c.category == CaseCategory.TRUE_MATCH)
+        return sum(1 for c in self.case_results if c.category in _TRUE_MATCH_CATEGORIES)
 
     @property
     def precision(self) -> float:
@@ -154,6 +165,12 @@ def _score_candidates(
             candidate_date=b_record.date,
             historical_encounters=a_record.historical_encounters,
             trust_state=a_record.trust_state,
+            # Phase 8: every Wave 8 record defaults to direction="DEBIT" (see
+            # evaluation/dataset.py), so this is a no-op for the original
+            # 250/250 dataset - direction_conflict is only ever True for the
+            # new DIRECTION_CONFLICT category, which is the point of it.
+            query_direction=a_record.direction,
+            candidate_direction=b_record.direction,
         )
         for b_record in candidates
     ]
@@ -172,7 +189,11 @@ def _classify_outcome(
 ) -> Outcome:
     is_auto_match = routing_decision == ConfidenceWall.AUTO_MATCH
 
-    if category == CaseCategory.TRUE_MATCH:
+    # A real correct partner exists whenever true_b_id is set (see
+    # _TRUE_MATCH_CATEGORIES above) - checking true_b_id directly rather than
+    # the literal TRUE_MATCH category handles RECURRING/PARTIAL_METADATA the
+    # same way without special-casing each new category.
+    if true_b_id is not None:
         found_correct_candidate = predicted_b_id == true_b_id
         if is_auto_match and found_correct_candidate:
             return Outcome.CORRECT_AUTO_MATCH
@@ -256,7 +277,7 @@ def naive_baseline_cost(dataset: EvaluationDataset, matcher: AIEntityMatcher | N
         top = ranked[0] if ranked else None
         predicted_b_id = top.evidence.get("b_id") if top else None
 
-        is_correct = case.category == CaseCategory.TRUE_MATCH and predicted_b_id == case.true_b_id
+        is_correct = case.category in _TRUE_MATCH_CATEGORIES and predicted_b_id == case.true_b_id
         if not is_correct:
             total_cost += COST_FALSE_MATCH
 
