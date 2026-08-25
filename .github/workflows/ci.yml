@@ -124,6 +124,8 @@ jobs:
         run: pytest evaluation/test_deterministic_baseline.py -v
       - name: Run confidence-wall policy tests
         run: pytest evaluation/test_confidence_wall_policy.py -v
+      - name: Run failure injection tests
+        run: pytest evaluation/test_failure_injection.py -v
 
   # --- Frontend (Flutter) ---
   frontend:
