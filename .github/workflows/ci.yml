@@ -128,6 +128,8 @@ jobs:
         run: pytest evaluation/test_failure_injection.py -v
       - name: Run performance qualification tests
         run: pytest evaluation/test_performance.py -v
+      - name: Run Track 04 end-to-end qualification test
+        run: pytest evaluation/test_track04_end_to_end.py -v
 
   # --- Frontend (Flutter) ---
   frontend:
