@@ -100,6 +100,8 @@ jobs:
         run: pytest test_api.py -v
       - name: Run matching-engine evaluation (Wave 8)
         run: pytest evaluation/test_evaluation.py -v
+      - name: Run matching-engine edge-case suite
+        run: pytest evaluation/test_edge_cases.py -v
 
   # --- Frontend (Flutter) ---
   frontend:
