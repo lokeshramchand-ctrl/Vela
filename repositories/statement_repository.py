@@ -135,6 +135,30 @@ class StatementRepository:
             },
         )
 
+    async def list_completed_for_user(self, user_id: str) -> list[Statement]:
+        """Unpaginated - the Controller's reconciliation stats/exceptions
+        (routers/controller.py) aggregate over every completed statement a
+        user has, not a page of them. Backed by the existing
+        (user_id, processing_status) index from ensure_indexes."""
+        query = {"user_id": user_id, "processing_status": StatementStatus.COMPLETED.value}
+        items = []
+        async for doc in db.statements.find(query):
+            doc["_id"] = str(doc["_id"])
+            items.append(Statement(**doc))
+        return items
+
+    async def mark_reconciliation_resolved(self, statement_id: str, approved: bool) -> None:
+        await db.statements.update_one(
+            {"_id": ObjectId(statement_id)},
+            {
+                "$set": {
+                    "reconciliation_resolved": True,
+                    "reconciliation_approved": approved,
+                    "reconciliation_resolved_at": datetime.now(UTC),
+                }
+            },
+        )
+
     async def mark_failed(self, statement_id: str, error_message: str) -> None:
         await db.statements.update_one(
             {"_id": ObjectId(statement_id)},

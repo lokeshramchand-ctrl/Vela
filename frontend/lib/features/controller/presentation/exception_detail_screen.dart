@@ -44,14 +44,14 @@ class _ExceptionDetailScreenState extends ConsumerState<ExceptionDetailScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _SourceCard(
-              source: 'Source A',
+              source: 'Declared',
               merchant: widget.exception.sourceAMerchant,
               amount: widget.exception.sourceAAmount,
               date: widget.exception.sourceADate,
             ),
             SizedBox(height: AppSpacing.md),
             _SourceCard(
-              source: 'Source B',
+              source: 'Computed',
               merchant: widget.exception.sourceBMerchant,
               amount: widget.exception.sourceBAmount,
               date: widget.exception.sourceBDate,
