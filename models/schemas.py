@@ -355,6 +355,12 @@ class Statement(CoreModel):
     computed_received_amount: float | None = None
     reconciliation_ok: bool | None = None
 
+    # Set only once a human has reviewed a reconciliation_ok=False statement
+    # via POST /controller/exceptions/{id}/resolve - see routers/controller.py.
+    reconciliation_resolved: bool = False
+    reconciliation_approved: bool | None = None
+    reconciliation_resolved_at: datetime | None = None
+
     transaction_count: int = 0
     processing_status: StatementStatus = StatementStatus.PENDING
     current_job_id: str | None = None

@@ -1,9 +1,21 @@
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Path
+
+from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, Field
 from typing import List
 
+from core.jwt_auth import get_current_user
+from models.schemas import Statement, User
+from repositories.statement_repository import statement_repo
+
 router = APIRouter(prefix="/controller", tags=["Controller"])
+
+# Mirrors statements/statement_service.py::_RECONCILIATION_EPSILON - used
+# here to figure out *which* side (sent/received) of an already-flagged
+# statement actually mismatched, since Statement.reconciliation_ok only
+# stores the combined AND of both checks.
+_RECONCILIATION_EPSILON = 0.01
+
 
 class ReconciliationStatsResponse(BaseModel):
     records_processed: int
@@ -40,83 +52,122 @@ class CashPositionResponse(BaseModel):
     variance: float
     contributing_exceptions: List[TransactionExceptionResponse]
 
+
+def _mismatched_sides(statement: Statement) -> list[str]:
+    """Which of declared-vs-computed sent/received actually differ beyond
+    tolerance. Statement.reconciliation_ok is a single AND of both checks
+    (statements/statement_service.py::_check_reconciliation), so recovering
+    which side is responsible has to redo the per-side comparison."""
+    sides = []
+    if statement.declared_sent_amount is None or statement.declared_received_amount is None:
+        return sides
+    if abs(statement.computed_sent_amount - statement.declared_sent_amount) >= _RECONCILIATION_EPSILON:
+        sides.append("sent")
+    if abs(statement.computed_received_amount - statement.declared_received_amount) >= _RECONCILIATION_EPSILON:
+        sides.append("received")
+    return sides
+
+
+def _exception_for_side(statement: Statement, side: str) -> TransactionExceptionResponse:
+    declared = statement.declared_sent_amount if side == "sent" else statement.declared_received_amount
+    computed = statement.computed_sent_amount if side == "sent" else statement.computed_received_amount
+    diff = abs(computed - declared)
+    period_end = datetime.combine(statement.period_end, datetime.min.time())
+
+    return TransactionExceptionResponse(
+        id=f"{statement.id}:{side}",
+        source_a_merchant=f"{statement.original_filename} (declared)",
+        source_a_amount=declared,
+        source_a_date=period_end,
+        source_b_merchant=f"{statement.original_filename} (computed from transactions)",
+        source_b_amount=computed,
+        source_b_date=period_end,
+        issue=f"{side.capitalize()} amount mismatch",
+        confidence=1.0,
+        reason=(
+            f"Statement declares {side} amount {declared:.2f}, but the parsed "
+            f"transactions sum to {computed:.2f} - a difference of {diff:.2f}, "
+            f"which exceeds the {_RECONCILIATION_EPSILON} reconciliation tolerance."
+        ),
+    )
+
+
+async def _pending_exceptions(user_id: str) -> tuple[list[TransactionExceptionResponse], list[Statement]]:
+    statements = await statement_repo.list_completed_for_user(user_id)
+    flagged = [s for s in statements if s.reconciliation_ok is False and not s.reconciliation_resolved]
+    exceptions = [
+        _exception_for_side(statement, side)
+        for statement in flagged
+        for side in (_mismatched_sides(statement) or ["sent"])
+    ]
+    return exceptions, statements
+
+
 @router.get("/stats", response_model=ReconciliationStatsResponse)
-async def get_reconciliation_stats():
+async def get_reconciliation_stats(current_user: User = Depends(get_current_user)):
     """
-    Returns current reconciliation statistics: records processed, matched,
-    exceptions, unresolved count, match rate, and total amount reconciled.
+    Returns reconciliation statistics computed from the current user's
+    completed statements: each statement's declared (from its own Sent/
+    Received header) vs computed (summed from parsed transactions) totals
+    are compared to classify it as matched, an exception, or unresolved
+    (declared totals weren't available to check against at all).
     """
+    statements = await statement_repo.list_completed_for_user(current_user.id)
+
+    records_processed = sum(s.transaction_count for s in statements)
+    matched_statements = [s for s in statements if s.reconciliation_ok is True]
+    exception_statements = [s for s in statements if s.reconciliation_ok is False]
+    unresolved_statements = [s for s in statements if s.reconciliation_ok is None]
+
+    matched = sum(s.transaction_count for s in matched_statements)
+    exceptions = sum(s.transaction_count for s in exception_statements)
+    unresolved = sum(s.transaction_count for s in unresolved_statements)
+    match_rate = matched / records_processed if records_processed else 0.0
+    amount_reconciled = sum(
+        (s.computed_sent_amount or 0.0) + (s.computed_received_amount or 0.0) for s in matched_statements
+    )
+
     return ReconciliationStatsResponse(
-        records_processed=250,
-        matched=221,
-        exceptions=21,
-        unresolved=8,
-        match_rate=0.884,
-        amount_reconciled=482300.0,
+        records_processed=records_processed,
+        matched=matched,
+        exceptions=exceptions,
+        unresolved=unresolved,
+        match_rate=match_rate,
+        amount_reconciled=amount_reconciled,
     )
 
 @router.get("/exceptions", response_model=ExceptionsListResponse)
-async def get_exceptions():
+async def get_exceptions(current_user: User = Depends(get_current_user)):
     """
-    Returns list of all pending exceptions awaiting review/resolution.
+    Returns pending exceptions: completed statements whose declared totals
+    don't match their computed (parsed-transaction) totals, and that haven't
+    already been resolved via POST /exceptions/{id}/resolve.
     """
-    return ExceptionsListResponse(
-        exceptions=[
-            TransactionExceptionResponse(
-                id="1",
-                source_a_merchant="Amazon",
-                source_a_amount=2499.0,
-                source_a_date=datetime(2026, 8, 10),
-                source_b_merchant="Amazon Pay",
-                source_b_amount=2599.0,
-                source_b_date=datetime(2026, 8, 10),
-                issue="Amount mismatch",
-                confidence=0.98,
-                reason="Merchant and date align, but amounts differ by ₹100.",
-            ),
-            TransactionExceptionResponse(
-                id="2",
-                source_a_merchant="Swiggy",
-                source_a_amount=450.0,
-                source_a_date=datetime(2026, 8, 15),
-                source_b_merchant="Swiggy Eats",
-                source_b_amount=460.0,
-                source_b_date=datetime(2026, 8, 14),
-                issue="Partial date mismatch",
-                confidence=0.72,
-                reason="Merchant names differ slightly and transactions are on different days.",
-            ),
-            TransactionExceptionResponse(
-                id="3",
-                source_a_merchant="Uber India",
-                source_a_amount=382.0,
-                source_a_date=datetime(2026, 8, 12),
-                source_b_merchant="Uber Eats",
-                source_b_amount=385.0,
-                source_b_date=datetime(2026, 8, 12),
-                issue="Merchant name variant",
-                confidence=0.65,
-                reason="Could be Uber Eats vs regular Uber. Amount variance is within 1%.",
-            ),
-        ]
-    )
+    exceptions, _ = await _pending_exceptions(current_user.id)
+    return ExceptionsListResponse(exceptions=exceptions)
 
 @router.get("/cash-position", response_model=CashPositionResponse)
-async def get_cash_position():
+async def get_cash_position(current_user: User = Depends(get_current_user)):
     """
-    Reconciles the period's cash position: opening balance plus verified
-    inflows minus verified outflows gives the expected closing balance,
-    compared against the bank-reported closing balance. Any variance is
-    attributed to the still-open exceptions that could explain it.
+    Reconciles the user's cash position across all completed statements:
+    verified inflows/outflows are the computed (parsed-transaction) sums,
+    while the reported closing balance uses each statement's own declared
+    totals. Any variance is attributed to the still-open exceptions that
+    could explain it.
     """
-    opening_balance = 50000.0
-    verified_inflows = 62300.0
-    verified_outflows = 29800.0
-    expected_closing_balance = opening_balance + verified_inflows - verified_outflows
-    reported_closing_balance = 80000.0
-    variance = reported_closing_balance - expected_closing_balance
+    exceptions, statements = await _pending_exceptions(current_user.id)
 
-    contributing = (await get_exceptions()).exceptions
+    opening_balance = 0.0  # No account-balance ledger exists in this app; each statement is a self-contained period.
+    verified_inflows = sum(s.computed_received_amount or 0.0 for s in statements)
+    verified_outflows = sum(s.computed_sent_amount or 0.0 for s in statements)
+    expected_closing_balance = opening_balance + verified_inflows - verified_outflows
+
+    declared_statements = [s for s in statements if s.declared_sent_amount is not None]
+    reported_inflows = sum(s.declared_received_amount or 0.0 for s in declared_statements)
+    reported_outflows = sum(s.declared_sent_amount or 0.0 for s in declared_statements)
+    reported_closing_balance = opening_balance + reported_inflows - reported_outflows
+
+    variance = reported_closing_balance - expected_closing_balance
 
     return CashPositionResponse(
         opening_balance=opening_balance,
@@ -125,19 +176,34 @@ async def get_cash_position():
         expected_closing_balance=expected_closing_balance,
         reported_closing_balance=reported_closing_balance,
         variance=variance,
-        contributing_exceptions=contributing,
+        contributing_exceptions=exceptions,
     )
 
 @router.post("/exceptions/{exception_id}/resolve")
 async def resolve_exception(
     exception_id: str = Path(..., min_length=1),
     request: ResolveExceptionRequest = None,
+    current_user: User = Depends(get_current_user),
 ):
     """
-    Resolves an exception by approving or rejecting the proposed match.
+    Resolves an exception (statement_id:side) by approving or rejecting the
+    flagged declared-vs-computed mismatch. Persists to the statement itself
+    so it drops out of future /exceptions and /cash-position responses.
     """
     if request is None:
         raise HTTPException(status_code=400, detail="Request body is required")
+
+    statement_id, _, side = exception_id.partition(":")
+    statement = await statement_repo.get_by_id(statement_id)
+    if (
+        statement is None
+        or statement.user_id != current_user.id
+        or statement.reconciliation_ok is not False
+        or side not in ("sent", "received")
+    ):
+        raise HTTPException(status_code=404, detail="Exception not found")
+
+    await statement_repo.mark_reconciliation_resolved(statement_id, request.approved)
 
     return {
         "success": True,

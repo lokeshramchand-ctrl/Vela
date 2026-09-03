@@ -1,11 +1,9 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/providers/core_providers.dart';
 import '../domain/reconciliation_stats.dart';
 import '../domain/exception.dart';
 import '../domain/cash_position.dart';
-import 'mock_controller_data.dart';
 
 class ControllerState {
   final ReconciliationStats stats;
@@ -69,11 +67,9 @@ class ControllerNotifier extends StateNotifier<ControllerState> {
   Future<void> fetchStats() async {
     try {
       state = state.copyWith(isLoading: true, error: null);
-      final stats = kDebugMode
-        ? await MockControllerRepository.fetchStats()
-        : ReconciliationStats.fromJson(
-          (await _apiClient.get('/api/controller/stats')).data
-        );
+      final stats = ReconciliationStats.fromJson(
+        (await _apiClient.get('/controller/stats')).data
+      );
       state = state.copyWith(stats: stats, isLoading: false);
     } catch (e) {
       state = state.copyWith(error: e.toString(), isLoading: false);
@@ -82,11 +78,9 @@ class ControllerNotifier extends StateNotifier<ControllerState> {
 
   Future<void> fetchExceptions() async {
     try {
-      final exceptions = kDebugMode
-        ? await MockControllerRepository.fetchExceptions()
-        : ((await _apiClient.get('/api/controller/exceptions')).data['exceptions'] as List?)
-          ?.map((e) => TransactionException.fromJson(e as Map<String, dynamic>))
-          .toList() ?? [];
+      final exceptions = ((await _apiClient.get('/controller/exceptions')).data['exceptions'] as List?)
+        ?.map((e) => TransactionException.fromJson(e as Map<String, dynamic>))
+        .toList() ?? [];
       state = state.copyWith(exceptions: exceptions);
     } catch (e) {
       state = state.copyWith(error: e.toString());
@@ -95,11 +89,9 @@ class ControllerNotifier extends StateNotifier<ControllerState> {
 
   Future<void> fetchCashPosition() async {
     try {
-      final cashPosition = kDebugMode
-        ? await MockControllerRepository.fetchCashPosition()
-        : CashPosition.fromJson(
-          (await _apiClient.get('/api/controller/cash-position')).data
-        );
+      final cashPosition = CashPosition.fromJson(
+        (await _apiClient.get('/controller/cash-position')).data
+      );
       state = state.copyWith(cashPosition: cashPosition);
     } catch (e) {
       state = state.copyWith(error: e.toString());
@@ -108,14 +100,10 @@ class ControllerNotifier extends StateNotifier<ControllerState> {
 
   Future<void> resolveException(String exceptionId, bool approved) async {
     try {
-      if (kDebugMode) {
-        await MockControllerRepository.resolveException(exceptionId, approved);
-      } else {
-        await _apiClient.post(
-          '/api/controller/exceptions/$exceptionId/resolve',
-          data: {'approved': approved},
-        );
-      }
+      await _apiClient.post(
+        '/controller/exceptions/$exceptionId/resolve',
+        data: {'approved': approved},
+      );
       state = state.copyWith(
         exceptions: state.exceptions
           .where((e) => e.id != exceptionId)
