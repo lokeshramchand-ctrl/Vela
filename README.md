@@ -276,6 +276,7 @@ uvicorn app:app --reload --host 0.0.0.0 --port 8000
 ```
 
 **Verify it's up:**
+
 ```bash
 curl http://localhost:8000/health
 ```
@@ -321,6 +322,7 @@ Every push and PR to `main`/`master`/`frontend` runs through [`.github/workflows
 ## Deployment
 
 **Build and run with Docker:**
+
 ```bash
 docker build -t vela-backend .
 docker run -p 8000:8000 --env-file .env vela-backend
@@ -364,12 +366,14 @@ All endpoints except `/health` and `/metrics` require the header `X-Vela-API-Key
 | `GET` | `/v1/observability/reports/latest` | Latest drift report (stub) |
 
 **Example interaction:**
+
 ```bash
 $ curl -s -X POST http://localhost:8000/v1/resolve \
     -H "X-Vela-API-Key: your-secret-key-here" \
     -H "Content-Type: application/json" \
     -d '{"text": "UPI/CR/3152671239/BUNDL TECHNOLOGIES/HDFC"}'
 ```
+
 ```json
 {
   "raw_text": "UPI/CR/3152671239/BUNDL TECHNOLOGIES/HDFC",

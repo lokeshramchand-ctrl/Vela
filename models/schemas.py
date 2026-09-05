@@ -1,5 +1,6 @@
 from datetime import UTC, date, datetime
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -116,6 +117,41 @@ class Transaction(CoreModel):
     bank: str | None = None
     account_last4: str | None = None
     payment_method: str = "UPI"
+
+
+class CanonicalFinancialRecord(CoreModel):
+    """Universal representation of a financial transaction that can be
+    populated from any source (GPay, bank statements, credit cards, etc.).
+    Serves as the foundation for reconciliation and cross-source analysis.
+
+    Every field retains source provenance through 'source' and 'source_record_id'.
+    Raw values are preserved in 'metadata' so information is never discarded."""
+    id: str | None = Field(alias="_id", default=None)
+
+    source: str
+    source_record_id: str
+    user_id: str
+
+    timestamp: datetime
+    amount: float
+    currency: str = "INR"
+
+    merchant_raw: str
+    merchant_normalized: str | None = None
+
+    transaction_type: TransactionType
+    status: TransactionStatus = TransactionStatus.SUCCESS
+
+    reference_id: str | None = None
+    description: str | None = None
+
+    category: str | None = None
+
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
 
 class Feedback(CoreModel):
     id: str | None = Field(alias="_id", default=None)
