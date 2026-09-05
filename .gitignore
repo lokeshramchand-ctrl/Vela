@@ -16,6 +16,9 @@ __pycache__/
 *.pyd
 *.log
 *.sqlite3
+.coverage
+.pytest_cache/
+.ruff_cache/
 
 # Ignore node modules if present
 node_modules/
